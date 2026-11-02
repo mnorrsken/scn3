@@ -229,10 +229,16 @@ jobs:
             $0 ~ "^## \\[" v "\\]" { found = 1; next }
             found && /^## /          { exit }
             found                    { print }
-          ' CHANGELOG.md > changes.md
+          ' CHANGELOG.md | sed '/./,$!d' > changes.md
           [ -s changes.md ] || { echo "No CHANGELOG section for $VERSION_NO_V" >&2; exit 1; }
-          # A pattern with no match prints nothing; it must not fail the step.
-          row() { for f in artifacts/$2; do if [ -e "$f" ]; then echo "| $1 | \`$(basename "$f")\` |"; fi; done; }
+          # One row per kind of download, its files side by side. No match, no row.
+          row() {
+            files=""
+            for f in artifacts/$2; do
+              if [ -e "$f" ]; then files="$files${files:+<br>}\`$(basename "$f")\`"; fi
+            done
+            if [ -n "$files" ]; then echo "| $1 | $files |"; fi
+          }
           {
             cat changes.md
             echo
@@ -243,10 +249,10 @@ jobs:
             row "Windows, installer" "*-installer.exe"
             row "Windows, single file (needs WebView2, which Windows 11 has)" "scn3.exe"
             row "macOS 13 or newer, Apple Silicon and Intel" "*.dmg"
-            row "Debian, Ubuntu (x86_64 / ARM64)" "*.deb"
-            row "Fedora, openSUSE (x86_64 / ARM64)" "*.rpm"
-            row "Other Linux (x86_64 / ARM64)" "*.AppImage"
-            row "Command line tool \`scan\`" "scan_*"
+            row "Debian, Ubuntu" "*.deb"
+            row "Fedora, openSUSE" "*.rpm"
+            row "Other Linux" "*.AppImage"
+            row "Command line tool \`scan\` (no install needed)" "scan_*"
             echo
             echo "## Installing"
             echo
