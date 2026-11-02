@@ -64,6 +64,7 @@ jobs:
             tags: -tags webkit2_41
           - os: macos-15
           - os: windows-2025
+            flags: -nsis
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -77,4 +78,13 @@ jobs:
       - name: Linux libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-      - run: go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.1 build -skipbindings ${{ matrix.tags }}
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        run: |
+          choco install nsis -y
+          "C:\Program Files (x86)\NSIS" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - run: go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.1 build -skipbindings ${{ matrix.tags }} ${{ matrix.flags }}
+      - name: Check the installer exists
+        if: runner.os == 'Windows'
+        shell: bash
+        run: test -f build/bin/scn3-amd64-installer.exe

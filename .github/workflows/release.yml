@@ -152,12 +152,18 @@ jobs:
         with:
           node-version: 24
       - name: Install NSIS
-        run: choco install nsis -y
+        run: |
+          choco install nsis -y
+          "C:\Program Files (x86)\NSIS" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Build installer
         shell: bash
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
           $WAILS build -skipbindings -nsis -webview2 download -ldflags "-X github.com/mnorrsken/scn3/internal/version.Version=$VERSION"
+      - name: Check the installer exists
+        shell: bash
+        # Wails only warns when makensis is missing, and the build still passes.
+        run: test -f build/bin/scn3-amd64-installer.exe
       - name: Sign
         shell: pwsh
         env:
@@ -176,6 +182,7 @@ jobs:
         with:
           name: windows
           path: build/bin/*.exe
+          if-no-files-found: error
 
   release:
     needs: [cli, linux, macos, windows]

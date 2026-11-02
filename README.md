@@ -34,7 +34,7 @@ Settings are saved as `scn3/settings.json` in your user config directory (`os.Us
 - A hard-linked file is counted once.
 - Symlinks are not followed.
 - Other mounts are not followed.
-- On macOS, APFS clones share data on disk but are counted in full, so the total can be too high.
+- On macOS, APFS clones of a file count once, in the folder the scan reaches first. A clone that was changed later still counts in full, so the total can be a little too high.
 
 ### The grey "not scanned" arc
 

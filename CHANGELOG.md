@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-beta.2] - 2026-11-02
+
+### Fixed
+
+- macOS: APFS clones of a file now count once, not once per copy.
+- Windows: releases now include the installer.
+
 ## [0.1.0-beta.1] - 2026-11-02
 
 Beta release. The Windows and Linux desktop apps are less tested than macOS, and builds are unsigned.

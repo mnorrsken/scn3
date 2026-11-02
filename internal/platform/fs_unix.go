@@ -32,7 +32,11 @@ func ReadDir(path string) ([]Entry, error) {
 			}
 			continue
 		}
-		entries = append(entries, entryOf(name, &st))
+		e := entryOf(name, &st)
+		if st.Mode&unix.S_IFMT == unix.S_IFREG {
+			markClone(fd, name, &e)
+		}
+		entries = append(entries, e)
 	}
 	return entries, firstErr
 }

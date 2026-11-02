@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+// markClone does nothing here: reflinks on btrfs and XFS are not detected.
+func markClone(int, string, *Entry) {}
+
 var pseudoFS = map[string]bool{
 	"autofs": true, "binfmt_misc": true, "bpf": true, "cgroup": true, "cgroup2": true,
 	"configfs": true, "debugfs": true, "devpts": true, "devtmpfs": true, "efivarfs": true,

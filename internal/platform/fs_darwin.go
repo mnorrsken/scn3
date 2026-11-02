@@ -1,15 +1,55 @@
 package platform
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
 const dataVolume = "/System/Volumes/Data"
+
+const (
+	attrCloneID      = 0x100 // ATTR_CMNEXT_CLONEID
+	attrExtFlags     = 0x200 // ATTR_CMNEXT_EXT_FLAGS
+	efMayShareBlocks = 1     // EF_MAY_SHARE_BLOCKS
+
+	// cloneDevBit keeps clone IDs apart from inode numbers in the (Dev, Ino)
+	// table: they are separate number ranges that could overlap.
+	cloneDevBit = 1 << 63
+)
+
+// markClone makes APFS clones of one file count once. A clone has its own inode
+// and full st_blocks while sharing its blocks, so without this every copy counts
+// in full. Pure clones share a clone ID, which then becomes the file's identity.
+// A clone that was modified afterwards gets a new ID and still counts in full.
+// Other filesystems fail this call or leave the flags out: such files stay as they are.
+func markClone(dirfd int, name string, e *Entry) {
+	path, err := unix.BytePtrFromString(name)
+	if err != nil {
+		return
+	}
+	list := unix.Attrlist{Bitmapcount: unix.ATTR_BIT_MAP_COUNT, Forkattr: attrCloneID | attrExtFlags}
+	// The result is packed: a uint32 length, then the two uint64 values.
+	var buf [20]byte
+	// x/sys has no wrapper for this call. If it ever stops working, clones just count in full again.
+	_, _, errno := unix.Syscall6(unix.SYS_GETATTRLISTAT, uintptr(dirfd), uintptr(unsafe.Pointer(path)), //nolint:staticcheck
+		uintptr(unsafe.Pointer(&list)), uintptr(unsafe.Pointer(&buf)), uintptr(len(buf)),
+		unix.FSOPT_NOFOLLOW|unix.FSOPT_ATTR_CMN_EXTENDED)
+	if errno != 0 || binary.LittleEndian.Uint32(buf[:4]) != uint32(len(buf)) {
+		return
+	}
+	if binary.LittleEndian.Uint64(buf[12:20])&efMayShareBlocks == 0 {
+		return
+	}
+	e.Linked = true
+	e.Dev |= cloneDevBit
+	e.Ino = binary.LittleEndian.Uint64(buf[4:12])
+}
 
 // Volumes lists mounted filesystems, without system snapshot volumes.
 func Volumes() ([]Volume, error) {
