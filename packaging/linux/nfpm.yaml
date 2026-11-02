@@ -1,0 +1,28 @@
+# Used with: VERSION=1.2.3 ARCH=amd64 nfpm package -f packaging/linux/nfpm.yaml -p deb
+name: scn3
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+maintainer: Martin Norrsken <46407660+mnorrsken@users.noreply.github.com>
+description: Sunburst disk usage analyzer
+homepage: https://github.com/mnorrsken/scn3
+license: Apache-2.0
+contents:
+  - src: build/bin/scn3
+    dst: /usr/bin/scn3
+    file_info:
+      mode: 0755
+  - src: packaging/linux/scn3.desktop
+    dst: /usr/share/applications/scn3.desktop
+  - src: build/appicon.png
+    dst: /usr/share/icons/hicolor/1024x1024/apps/scn3.png
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0
+      - libwebkit2gtk-4.1-0
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1

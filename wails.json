@@ -1,0 +1,12 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "scn3",
+  "outputfilename": "scn3",
+  "frontend:dir": "frontend",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": { "name": "Martin Norrsken", "email": "46407660+mnorrsken@users.noreply.github.com" },
+  "info": { "productName": "scn3", "companyName": "mnorrsken", "comments": "Sunburst disk usage analyzer" }
+}

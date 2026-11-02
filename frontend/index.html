@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>scn3</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <div id="toolbar">
+        <button id="up" title="Up to the parent folder (Backspace)">Up</button>
+        <button id="back" title="Back (Alt+Left)">Back</button>
+        <button id="rescan" title="Rescan this folder (F5)">Rescan</button>
+        <button id="cancel" hidden>Cancel</button>
+        <nav id="crumbs" aria-label="Path"></nav>
+        <select id="theme" aria-label="Theme">
+          <option value="system">System theme</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+      <div id="info" aria-live="polite"></div>
+    </header>
+    <main>
+      <aside>
+        <h2>Volumes</h2>
+        <ul id="volumes"></ul>
+        <label class="check"><input type="checkbox" id="summary" /> Summary</label>
+        <button id="folder">Scan a folder…</button>
+      </aside>
+      <section id="stage">
+        <div id="progress" hidden>
+          <div id="progress-text"></div>
+          <div class="bar"><div id="progress-bar"></div></div>
+        </div>
+        <div id="denied" hidden>
+          <span id="denied-text"></span>
+          <button id="privacy" hidden>Open Full Disk Access settings</button>
+        </div>
+        <canvas id="chart"></canvas>
+        <p id="empty">Choose a volume or folder to scan.</p>
+      </section>
+    </main>
+    <div id="menu" role="menu" hidden></div>
+    <div id="toast" role="alert" hidden></div>
+    <dialog id="confirm">
+      <p id="confirm-text"></p>
+      <form method="dialog">
+        <button value="cancel">Cancel</button>
+        <button value="ok" id="confirm-ok">Move to Trash</button>
+      </form>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,210 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  WAILS: go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./internal/... ./cmd/...
+      - name: govulncheck
+        if: runner.os == 'Linux'
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./internal/... ./cmd/...
+      - uses: actions/setup-node@v7
+        if: runner.os == 'Linux'
+        with:
+          node-version: 24
+      - name: UI tests
+        if: runner.os == 'Linux'
+        working-directory: frontend
+        run: npm ci && npm test
+
+  cli:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cross-compile
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          LDFLAGS="-s -w -X github.com/mnorrsken/scn3/internal/version.Version=$VERSION -X github.com/mnorrsken/scn3/internal/version.Commit=${GITHUB_SHA::7}"
+          mkdir -p dist
+          for t in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64 windows/arm64; do
+            os=${t%/*}; arch=${t#*/}; ext=; [ "$os" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "dist/scan_${VERSION#v}_${os}_${arch}${ext}" ./cmd/scan
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cli
+          path: dist/*
+
+  linux:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Build
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          $WAILS build -skipbindings -tags webkit2_41 -ldflags "-s -w -X github.com/mnorrsken/scn3/internal/version.Version=$VERSION"
+      - name: deb and rpm
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          export VERSION="${GITHUB_REF#refs/tags/v}"
+          mkdir -p dist
+          go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0 package -f packaging/linux/nfpm.yaml -p deb -t dist/
+          go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0 package -f packaging/linux/nfpm.yaml -p rpm -t dist/
+      - name: AppImage
+        run: packaging/linux/appimage.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/*
+
+  macos:
+    needs: test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Build universal app
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          $WAILS build -skipbindings -platform darwin/universal -ldflags "-s -w -X github.com/mnorrsken/scn3/internal/version.Version=$VERSION"
+      - name: Import signing certificate
+        env:
+          CERT: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          [ -n "$CERT" ] || { echo "No certificate: the dmg will be unsigned"; exit 0; }
+          kc="$RUNNER_TEMP/sign.keychain-db"
+          security create-keychain -p "$CERT_PASSWORD" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$CERT_PASSWORD" "$kc"
+          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$CERT_PASSWORD" "$kc"
+          security list-keychains -d user -s "$kc"
+      - name: Sign, notarise, make dmg
+        env:
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: packaging/darwin/package.sh "${GITHUB_REF#refs/tags/v}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: dist/*
+
+  windows:
+    needs: test
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install NSIS
+        run: choco install nsis -y
+      - name: Build installer
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          $WAILS build -skipbindings -nsis -webview2 download -ldflags "-X github.com/mnorrsken/scn3/internal/version.Version=$VERSION"
+      - name: Sign
+        shell: pwsh
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_PFX }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if (-not $env:CERT) { Write-Host "No certificate: binaries stay unsigned"; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP cert.pfx
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          Get-ChildItem build/bin -Filter *.exe | ForEach-Object {
+            & $signtool.FullName sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: build/bin/*.exe
+
+  release:
+    needs: [cli, linux, macos, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum * > checksums.txt
+      - name: Release notes
+        run: |
+          VERSION_NO_V="${GITHUB_REF#refs/tags/v}"
+          awk -v v="$VERSION_NO_V" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## /          { exit }
+            found                    { print }
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "No CHANGELOG section for $VERSION_NO_V" >&2; exit 1; }
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          flags=
+          case "$VERSION" in *-*) flags=--prerelease ;; esac
+          gh release create "$VERSION" --title "Release $VERSION" --notes-file notes.md $flags artifacts/*

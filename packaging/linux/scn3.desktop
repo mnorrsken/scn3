@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=scn3
+Comment=See what fills your disk
+Exec=scn3
+Icon=scn3
+Categories=System;Utility;
+Terminal=false
