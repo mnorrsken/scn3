@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mnorrsken/scn3/internal/tree"
 )
@@ -183,6 +184,43 @@ func TestCancelStopsAndKeepsPartialTree(t *testing.T) {
 	cancel()
 	if err := s.Run(ctx, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNewestModificationTime(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "old/deep/f"), 10)
+	write(t, filepath.Join(root, "new/f"), 10)
+	oldTime := time.Date(2001, 1, 2, 3, 4, 5, 0, time.UTC)
+	newTime := time.Date(2025, 6, 7, 8, 9, 10, 0, time.UTC)
+	for _, p := range []string{"old/deep/f", "old/deep", "old", "new"} {
+		if err := os.Chtimes(filepath.Join(root, p), oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(filepath.Join(root, "new/f"), newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	v := run(t, root).Tree.View(tree.Root, 2, 0, true)
+	got := map[string]int64{}
+	for _, k := range v.Kids {
+		got[k.Name] = k.Mtime
+	}
+	if got["old"] != oldTime.Unix() || got["new"] != newTime.Unix() || v.Mtime < newTime.Unix() {
+		t.Fatalf("old %d, new %d, root %d", got["old"], got["new"], v.Mtime)
+	}
+}
+
+func TestFutureTimesCountAsNow(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "cache/f"), 10)
+	ahead := time.Now().Add(7 * 24 * time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "cache/f"), ahead, ahead); err != nil {
+		t.Fatal(err)
+	}
+	v := run(t, root).Tree.View(tree.Root, 1, 0, true)
+	if limit := time.Now().Unix() + 1; v.Mtime > limit || v.Kids[0].Mtime > limit {
+		t.Fatalf("root %d, cache %d: later than now (%d)", v.Mtime, v.Kids[0].Mtime, limit)
 	}
 }
 

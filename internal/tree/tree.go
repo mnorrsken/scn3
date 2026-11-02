@@ -35,16 +35,27 @@ type node struct {
 	nameOff uint32
 	nameLen uint16
 	flags   uint16
-	own     int64  // bytes of loose files plus the directory entry itself
-	size    int64  // own plus all live descendants
-	ownFile uint32 // loose files directly in this directory
-	files   uint32 // ownFile plus all live descendants
+	// Modification times are Unix seconds in a uint32: they last until 2106,
+	// and in this field order a node stays at 56 bytes.
+	selfTime uint32 // the directory entry itself
+	own      int64  // bytes of loose files plus the directory entry itself
+	size     int64  // own plus all live descendants
+	ownFile  uint32 // loose files directly in this directory
+	files    uint32 // ownFile plus all live descendants
+	fileTime uint32 // newest loose file
+	time     uint32 // newest file or folder anywhere inside
 }
 
-// Child describes a subdirectory passed to AddDir.
+// Child describes a subdirectory passed to Add.
 type Child struct {
-	Name string
-	Own  int64 // on-disk size of the directory entry itself
+	Name  string
+	Own   int64 // on-disk size of the directory entry itself
+	Mtime int64 // modification time of the directory entry, Unix seconds
+}
+
+// unixTime packs a Unix time in seconds into a node field.
+func unixTime(t int64) uint32 {
+	return uint32(min(max(t, 0), 1<<32-1))
 }
 
 // Tree is a directory tree rooted at a filesystem path.
@@ -62,9 +73,10 @@ func New(rootPath string) *Tree {
 }
 
 // Add records what a scan found directly in directory id: loose file bytes,
-// the loose file count and subdirectories. It returns the ID of the first
-// subdirectory; the rest follow in order.
-func (t *Tree) Add(id ID, bytes int64, files uint32, kids []Child, denied bool) ID {
+// the loose file count, the newest loose file's modification time and the
+// subdirectories. It returns the ID of the first subdirectory; the rest follow
+// in order.
+func (t *Tree) Add(id ID, bytes int64, files uint32, filesTime int64, kids []Child, denied bool) ID {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -74,13 +86,18 @@ func (t *Tree) Add(id ID, bytes int64, files uint32, kids []Child, denied bool) 
 		off := uint32(len(t.names))
 		t.names = append(t.names, k.Name...)
 		t.nodes = append(t.nodes, node{
-			parent:  id,
-			nameOff: off,
-			nameLen: uint16(len(k.Name)),
-			own:     k.Own,
-			size:    k.Own,
+			parent:   id,
+			nameOff:  off,
+			nameLen:  uint16(len(k.Name)),
+			own:      k.Own,
+			size:     k.Own,
+			selfTime: unixTime(k.Mtime),
 		})
 		kidBytes += k.Own
+	}
+	newest := unixTime(filesTime)
+	for _, k := range kids {
+		newest = max(newest, unixTime(k.Mtime))
 	}
 
 	n := &t.nodes[id]
@@ -92,8 +109,37 @@ func (t *Tree) Add(id ID, bytes int64, files uint32, kids []Child, denied bool) 
 		n.flags |= flagDenied
 		t.denied++
 	}
+	n.fileTime = max(n.fileTime, unixTime(filesTime))
 	t.propagate(id, bytes+kidBytes, int64(files))
+	t.raiseTime(id, newest)
 	return first
+}
+
+// raiseTime makes id and its ancestors at least as new as v.
+func (t *Tree) raiseTime(id ID, v uint32) {
+	for i := id; i != noParent; i = t.nodes[i].parent {
+		n := &t.nodes[i]
+		if n.time >= v {
+			return // the ancestors are at least as new already
+		}
+		n.time = v
+		v = max(v, n.selfTime)
+	}
+}
+
+// recomputeTime works out the newest time again for id and its ancestors,
+// after something inside was removed.
+func (t *Tree) recomputeTime(id ID) {
+	for i := id; i != noParent; i = t.nodes[i].parent {
+		n := &t.nodes[i]
+		v := n.fileTime
+		for k := n.first; k < n.first+n.nkids; k++ {
+			if c := &t.nodes[k]; c.flags&flagRemoved == 0 {
+				v = max(v, c.selfTime, c.time)
+			}
+		}
+		n.time = v
+	}
 }
 
 // propagate adds deltas to id and all its ancestors.
@@ -104,14 +150,18 @@ func (t *Tree) propagate(id ID, bytes, files int64) {
 	}
 }
 
-// SetOwn sets the on-disk size of directory id's own entry. Use it for the
-// root, which has no parent to report it, or after Clear.
-func (t *Tree) SetOwn(id ID, own int64) {
+// SetOwn sets the on-disk size and modification time of directory id's own
+// entry. Use it for the root, which has no parent to report it, or after Clear.
+func (t *Tree) SetOwn(id ID, own, mtime int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delta := own - t.nodes[id].own
 	t.nodes[id].own = own
+	t.nodes[id].selfTime = unixTime(mtime)
 	t.propagate(id, delta, 0)
+	if p := t.nodes[id].parent; p != noParent {
+		t.raiseTime(p, t.nodes[id].selfTime)
+	}
 }
 
 // Clear empties directory id so that it can be scanned again. Ancestor totals
@@ -123,9 +173,11 @@ func (t *Tree) Clear(id ID) {
 	size, files := n.size, n.files
 	t.denied -= t.countDenied(id)
 	n.first, n.nkids, n.own, n.size, n.ownFile, n.files = 0, 0, 0, 0, 0, 0
+	n.fileTime, n.time = 0, 0
 	n.flags &^= flagDenied
 	if n.parent != noParent {
 		t.propagate(n.parent, -size, -int64(files))
+		t.recomputeTime(n.parent)
 	}
 }
 
@@ -140,6 +192,7 @@ func (t *Tree) Remove(id ID) {
 	t.denied -= t.countDenied(id)
 	n.flags |= flagRemoved
 	t.propagate(n.parent, -n.size, -int64(n.files))
+	t.recomputeTime(n.parent)
 }
 
 func (t *Tree) countDenied(id ID) int {
@@ -157,6 +210,13 @@ func (t *Tree) countDenied(id ID) int {
 	return c
 }
 
+// FilesTime returns the modification time of the newest loose file in id.
+func (t *Tree) FilesTime(id ID) int64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return int64(t.nodes[id].fileTime)
+}
+
 // Own returns the bytes and count of the loose files directly in id, plus
 // the size of the directory entry itself.
 func (t *Tree) Own(id ID) (bytes int64, files int64) {
@@ -165,7 +225,9 @@ func (t *Tree) Own(id ID) (bytes int64, files int64) {
 	return t.nodes[id].own, int64(t.nodes[id].ownFile)
 }
 
-// RemoveFile takes one loose file of size bytes out of directory id.
+// RemoveFile takes one loose file of size bytes out of directory id. The
+// directory's newest time is left as it was: the tree does not keep each
+// file's time, so it cannot tell whether this file was the newest.
 func (t *Tree) RemoveFile(id ID, bytes int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -266,7 +328,8 @@ type ViewNode struct {
 	Files  int64       `json:"files"`
 	Kind   string      `json:"kind"`
 	Denied bool        `json:"denied,omitempty"`
-	Path   string      `json:"path,omitempty"` // set only where it cannot be derived from the parent
+	Mtime  int64       `json:"mtime,omitempty"` // newest modification inside, Unix seconds
+	Path   string      `json:"path,omitempty"`  // set only where it cannot be derived from the parent
 	Kids   []*ViewNode `json:"kids,omitempty"`
 }
 
@@ -291,6 +354,10 @@ func (t *Tree) viewNode(id ID, depth int, minBytes int64, files bool) *ViewNode 
 		Files:  int64(n.files),
 		Kind:   KindDir,
 		Denied: n.flags&flagDenied != 0,
+		Mtime:  int64(n.time),
+	}
+	if n.time == 0 {
+		v.Mtime = int64(n.selfTime) // empty folder: its own time is all there is
 	}
 	if depth <= 0 {
 		return v
@@ -298,6 +365,7 @@ func (t *Tree) viewNode(id ID, depth int, minBytes int64, files bool) *ViewNode 
 
 	big := make([]ID, 0, n.nkids)
 	var otherSize, otherFiles int64
+	var otherTime uint32
 	for i := n.first; i < n.first+n.nkids; i++ {
 		c := &t.nodes[i]
 		if c.flags&flagRemoved != 0 || c.size == 0 {
@@ -306,6 +374,7 @@ func (t *Tree) viewNode(id ID, depth int, minBytes int64, files bool) *ViewNode 
 		if c.size < minBytes {
 			otherSize += c.size
 			otherFiles += int64(c.files)
+			otherTime = max(otherTime, c.selfTime, c.time)
 			continue
 		}
 		big = append(big, i)
@@ -319,6 +388,7 @@ func (t *Tree) viewNode(id ID, depth int, minBytes int64, files bool) *ViewNode 
 		if n.own < minBytes {
 			otherSize += n.own
 			otherFiles += int64(n.ownFile)
+			otherTime = max(otherTime, n.fileTime)
 		} else {
 			kids = append(kids, &ViewNode{
 				Ref:   int64(id),
@@ -326,12 +396,13 @@ func (t *Tree) viewNode(id ID, depth int, minBytes int64, files bool) *ViewNode 
 				Size:  n.own,
 				Files: int64(n.ownFile),
 				Kind:  KindFiles,
+				Mtime: int64(n.fileTime),
 			})
 		}
 	}
 	sort.SliceStable(kids, func(a, b int) bool { return kids[a].Size > kids[b].Size })
 	if otherSize > 0 {
-		kids = append(kids, &ViewNode{Ref: -1, Name: "other", Size: otherSize, Files: otherFiles, Kind: KindOther})
+		kids = append(kids, &ViewNode{Ref: -1, Name: "other", Size: otherSize, Files: otherFiles, Kind: KindOther, Mtime: int64(otherTime)})
 	}
 	v.Kids = kids
 	return v

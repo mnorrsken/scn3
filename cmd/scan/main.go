@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/mnorrsken/scn3/internal/scanner"
 	"github.com/mnorrsken/scn3/internal/tree"
@@ -103,11 +104,15 @@ type outNode struct {
 	Size     int64      `json:"size"`
 	Files    int64      `json:"files"`
 	Denied   bool       `json:"denied,omitempty"`
+	Modified string     `json:"modified,omitempty"` // newest modification inside, RFC 3339
 	Children []*outNode `json:"children,omitempty"`
 }
 
 func jsonNode(v *tree.ViewNode) *outNode {
 	n := &outNode{Name: v.Name, Path: v.Path, Kind: v.Kind, Size: v.Size, Files: v.Files, Denied: v.Denied}
+	if v.Mtime > 0 {
+		n.Modified = time.Unix(v.Mtime, 0).UTC().Format(time.RFC3339)
+	}
 	for _, k := range v.Kids {
 		n.Children = append(n.Children, jsonNode(k))
 	}

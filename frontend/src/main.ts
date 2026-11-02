@@ -1,11 +1,11 @@
 import { api, copyText, dialogs, onProgress, type Progress, type View, type Volume } from "./backend";
 import {
-  FULL, findArc, formatBytes, geometry, hitTest, layout, lerpDomain, MAX_DEPTH, minFraction, pathOf, zoomScene,
-  type Arc, type Domain, type Geometry, type Mode,
+  FULL, findArc, formatBytes, formatDate, geometry, hitTest, layout, lerpDomain, MAX_DEPTH, minFraction, pathOf, zoomScene,
+  heatColor, inWedge, scannedEnd, TAU, type Arc, type Colors, type Domain, type Geometry, type Mode,
 } from "./layout";
 import { icon } from "./icons";
 import { Nav } from "./nav";
-import { drawArcs, drawCenter, drawHighlight, drawLabels, type Palette } from "./render";
+import { drawArcs, drawCenter, drawHighlight, drawLabels, drawWedge, type Palette } from "./render";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("chart");
@@ -26,6 +26,15 @@ let dpr = 1;
 let dirty = true;
 let tween: { arcs: Arc[]; from: Domain; to: Domain; start: number; done: () => void } | null = null;
 let showAllDrives = false;
+let colorMode: Colors = "folders";
+let hideLabels = false;
+// "Scanned only": free and not-scanned space hidden, the scanned part filling the circle.
+let scannedOnly = false;
+let scannedShare = 1; // scanned part of the full circle, to scale the cull limit
+let wedgeEnd: number | null = null; // where the band ends, null when there is no band
+let hoverWedge = false;
+// The unreadable-folders notice stays closed for this scan and count, and comes back if either changes.
+let deniedDismissed = "";
 let platform = "";
 let themeChoice = "system";
 let refetchTimer = 0;
@@ -51,6 +60,7 @@ function palette(): Palette {
   const v = (name: string) => css.getPropertyValue(name).trim();
   return {
     mode: document.documentElement.dataset.theme as Mode,
+    colors: colorMode,
     bg: v("--bg"),
     text: v("--text"),
     quiet: v("--quiet"),
@@ -78,10 +88,25 @@ function applyTheme(): void {
     item.setAttribute("aria-checked", String(item.dataset.theme === themeChoice));
   }
   pal = palette();
+  updateLegend();
   dirty = true;
   schedule();
 }
 systemDark.addEventListener("change", applyTheme);
+
+function updateLegend(): void {
+  const on = colorMode === "age";
+  $("legend").hidden = !on || !view;
+  $("colors").setAttribute("aria-pressed", String(on));
+  const mode = document.documentElement.dataset.theme as Mode;
+  const steps = Array.from({ length: 11 }, (_, i) => heatColor(i / 10, mode));
+  $("legend").querySelector<HTMLElement>(".ramp")!.style.background = `linear-gradient(to right, ${steps.join(", ")})`;
+}
+
+function setColorMode(next: Colors): void {
+  colorMode = next;
+  applyTheme();
+}
 systemContrast.addEventListener("change", applyTheme);
 
 // ---- drawing ----
@@ -120,8 +145,9 @@ function frame(now: number): void {
     clear(baseCtx);
     if (view) {
       drawArcs(baseCtx, rings.flat(), geom, pal);
-      drawLabels(baseCtx, rings, geom, pal);
+      if (!hideLabels) drawLabels(baseCtx, rings, geom, pal);
       drawCenter(baseCtx, geom, pal, view.root.name, formatBytes(view.root.size));
+      if (wedgeEnd !== null) drawWedge(baseCtx, geom, pal, wedgeEnd, scannedOnly, false);
     }
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -130,6 +156,10 @@ function frame(now: number): void {
   if (hover) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawHighlight(ctx, hover, geom, pal);
+  }
+  if (hoverWedge && wedgeEnd !== null) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawWedge(ctx, geom, pal, wedgeEnd, scannedOnly, true);
   }
 }
 
@@ -151,14 +181,29 @@ new ResizeObserver(resize).observe($("area"));
 
 // ---- view ----
 
-const fetchView = (ref: number): Promise<View> => api().View(ref, MAX_DEPTH, minFraction(geom.R));
+// In the scanned-only view the scanned part is stretched to the full circle,
+// so segments can be smaller and still be drawn.
+const fetchView = (ref: number): Promise<View> =>
+  api().View(ref, MAX_DEPTH, minFraction(geom.R) * (scannedOnly ? scannedShare : 1));
+
+const isPinned = (k: { kind: string }) => k.kind === "free" || k.kind === "unscanned";
 
 function show(v: View): void {
+  const kids = v.root.kids ?? [];
+  const hidden = kids.some(isPinned);
+  if (!scannedOnly || !hidden) {
+    const total = kids.reduce((n, k) => n + k.size, 0);
+    if (total > 0) scannedShare = kids.filter((k) => !isPinned(k)).reduce((n, k) => n + k.size, 0) / total;
+  }
+  if (scannedOnly && hidden) v = { ...v, root: { ...v.root, kids: kids.filter((k) => !isPinned(k)) } };
   view = v;
   rings = layout(v.root, geom.R);
+  wedgeEnd = !hidden ? null : scannedOnly ? TAU : scannedEnd(rings);
+  hoverWedge = false;
   hover = null;
   dirty = true;
   $("empty").hidden = true;
+  updateLegend();
   updateChrome();
   schedule();
 }
@@ -332,7 +377,8 @@ function updateChrome(): void {
   });
 
   const denied = $("denied");
-  denied.hidden = !v?.denied;
+  const deniedKey = v ? `${v.crumbs[0]?.ref}:${v.denied}` : "";
+  denied.hidden = !v?.denied || deniedKey === deniedDismissed;
   if (v?.denied) {
     $("denied-text").textContent = `${v.denied} folder${v.denied === 1 ? "" : "s"} could not be read, so totals are low.`;
     $("privacy").hidden = platform !== "darwin";
@@ -354,9 +400,11 @@ function showInfo(): void {
     return;
   }
   const count = (n: number) => `${n.toLocaleString()} ${n === 1 ? "file" : "files"}`;
+  const ahead = (t: number) => (t > Date.now() / 1000 + 3600 ? " (in the future)" : "");
+  const changed = (t?: number) => (t ? `  ·  changed ${formatDate(t)}${ahead(t)}` : "");
   const a = hover;
   if (!a) {
-    setInfo(v.root.path || v.root.name, `${formatBytes(v.root.size)}  ·  ${count(v.root.files)}`);
+    setInfo(v.root.path || v.root.name, `${formatBytes(v.root.size)}  ·  ${count(v.root.files)}${changed(v.root.mtime)}`);
     return;
   }
   if (a.kind === "free") {
@@ -370,7 +418,7 @@ function showInfo(): void {
   const parentSize = a.parent?.size ?? v.root.size;
   const pct = (part: number, whole: number) => (whole > 0 ? `${((100 * part) / whole).toFixed(1)}%` : "–");
   const where = a.kind === "other" ? `Small items in ${arcPath(a.parent ?? a)}` : arcPath(a);
-  setInfo(where, `${formatBytes(a.size)}  ·  ${count(a.files)}  ·  ${pct(a.size, parentSize)} of parent  ·  ${pct(a.size, v.volumeBytes)} of volume`);
+  setInfo(where, `${formatBytes(a.size)}  ·  ${count(a.files)}  ·  ${pct(a.size, parentSize)} of parent  ·  ${pct(a.size, v.volumeBytes)} of volume${changed(a.mtime)}`);
 }
 
 /** Status line of a drive card: scan progress while scanning, free space otherwise. */
@@ -455,8 +503,56 @@ function pointer(e: MouseEvent) {
   return hitTest(rings, geom, e.clientX - box.left, e.clientY - box.top);
 }
 
+function onWedge(e: MouseEvent): boolean {
+  if (wedgeEnd === null) return false;
+  const box = canvas.getBoundingClientRect();
+  return inWedge(geom, e.clientX - box.left, e.clientY - box.top, wedgeEnd);
+}
+
+/** Switches the scanned-only view, stretching or shrinking the scanned part. */
+async function toggleScannedOnly(): Promise<void> {
+  if (!view || wedgeEnd === null || tween || nav.current === null) return;
+  const turnOn = !scannedOnly;
+  const end = wedgeEnd;
+  scannedOnly = turnOn;
+  let next: View;
+  try {
+    next = await fetchView(nav.current);
+  } catch (err) {
+    scannedOnly = !turnOn;
+    report(err);
+    return;
+  }
+  hover = null;
+  hoverWedge = false;
+  if (turnOn) {
+    tween = { arcs: rings.flat(), from: FULL, to: { a0: 0, a1: end, depth: 0 }, start: performance.now(), done: () => show(next) };
+  } else {
+    const nextRings = layout(next.root, geom.R);
+    const nextEnd = scannedEnd(nextRings) ?? TAU;
+    tween = { arcs: nextRings.flat(), from: { a0: 0, a1: nextEnd, depth: 0 }, to: FULL, start: performance.now(), done: () => show(next) };
+  }
+  schedule();
+}
+
 canvas.addEventListener("mousemove", (e) => {
   if (tween) return;
+  const wedge = onWedge(e);
+  if (wedge !== hoverWedge) {
+    hoverWedge = wedge;
+    hover = null;
+    canvas.style.cursor = wedge ? "pointer" : "default";
+    if (wedge) {
+      setInfo(
+        scannedOnly ? "Showing only scanned space" : "Show only scanned space",
+        scannedOnly ? "Click to show free and not-scanned space again" : "Click to let the scanned folders fill the circle",
+      );
+    } else {
+      showInfo();
+    }
+    schedule();
+  }
+  if (wedge) return;
   const hit = pointer(e);
   const arc = hit && !hit.center ? hit.arc : null;
   if (arc !== hover) {
@@ -469,12 +565,17 @@ canvas.addEventListener("mousemove", (e) => {
 
 canvas.addEventListener("mouseleave", () => {
   hover = null;
+  hoverWedge = false;
   showInfo();
   schedule();
 });
 
 canvas.addEventListener("click", (e) => {
   closeMenu();
+  if (onWedge(e)) {
+    void toggleScannedOnly();
+    return;
+  }
   const hit = pointer(e);
   if (!hit) return;
   if (hit.center) up();
@@ -571,6 +672,11 @@ $("folder").onclick = async () => {
   }
 };
 $("privacy").onclick = () => void dialogs().OpenPrivacySettings();
+$("denied-close").innerHTML = icon("close");
+$("denied-close").onclick = () => {
+  if (view) deniedDismissed = `${view.crumbs[0]?.ref}:${view.denied}`;
+  $("denied").hidden = true;
+};
 $<HTMLInputElement>("show-all").onchange = (e) => {
   showAllDrives = (e.target as HTMLInputElement).checked;
   renderVolumes();
@@ -594,7 +700,22 @@ for (const item of themeMenu.querySelectorAll<HTMLButtonElement>("button")) {
 document.addEventListener("mousedown", (e) => {
   if (!themeMenu.contains(e.target as Node) && !$("theme").contains(e.target as Node)) setThemeMenu(false);
 });
-for (const [id, name] of [["up", "up"], ["back", "back"], ["rescan", "rescan"], ["cancel", "cancel"]]) $(id).innerHTML = icon(name);
+for (const [id, name] of [["up", "up"], ["back", "back"], ["rescan", "rescan"], ["cancel", "cancel"], ["colors", "age"], ["labels", "labels"]]) $(id).innerHTML = icon(name);
+function setHideLabels(hide: boolean): void {
+  hideLabels = hide;
+  $("labels").setAttribute("aria-pressed", String(!hide));
+  $("labels").title = hide ? "Show names in the chart" : "Hide names in the chart";
+  dirty = true;
+  schedule();
+}
+$("labels").onclick = () => {
+  setHideLabels(!hideLabels);
+  void api().SetHideLabels(hideLabels).catch(report);
+};
+$("colors").onclick = () => {
+  setColorMode(colorMode === "age" ? "folders" : "age");
+  void api().SetColorMode(colorMode).catch(report);
+};
 $("folder").innerHTML = `${icon("folder")}<span>Scan a folder…</span>`;
 
 // ---- start ----
@@ -609,6 +730,8 @@ async function start(): Promise<void> {
     platform = os;
     themeChoice = settings.theme;
     showAllDrives = settings.showAllDrives;
+    colorMode = settings.colorMode === "age" ? "age" : "folders";
+    setHideLabels(settings.hideLabels);
     $<HTMLInputElement>("show-all").checked = showAllDrives;
     applyTheme();
   } catch (err) {

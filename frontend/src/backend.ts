@@ -9,6 +9,7 @@ export interface ViewNode {
   files: number;
   kind: Kind;
   denied?: boolean;
+  mtime?: number; // newest modification inside, Unix seconds
   path?: string;
   kids?: ViewNode[];
 }
@@ -51,6 +52,8 @@ export interface Progress {
 export interface Settings {
   theme: string;
   showAllDrives: boolean;
+  colorMode: string;
+  hideLabels: boolean;
   width: number;
   height: number;
 }
@@ -69,6 +72,8 @@ interface Api {
   Settings(): Promise<Settings>;
   SetTheme(theme: string): Promise<void>;
   SetShowAllDrives(show: boolean): Promise<void>;
+  SetColorMode(mode: string): Promise<void>;
+  SetHideLabels(hide: boolean): Promise<void>;
   Platform(): Promise<string>;
 }
 

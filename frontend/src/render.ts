@@ -1,9 +1,10 @@
 // Draws arcs on a canvas. Coordinates are CSS pixels; the caller scales for DPR.
 
-import { arcColor, FULL, TAU, type Arc, type Domain, type Geometry, type Mode } from "./layout";
+import { arcColor, FULL, inkOn, TAU, WEDGE_IN, WEDGE_OUT, type Arc, type Colors, type Domain, type Geometry, type Mode } from "./layout";
 
 export interface Palette {
   mode: Mode;
+  colors: Colors;
   bg: string;
   text: string;
   quiet: string;
@@ -46,7 +47,7 @@ export function drawArcs(ctx: CanvasRenderingContext2D, arcs: Arc[], g: Geometry
       addSegment(outlines, g, q.s, q.e, q.rIn, q.rOut);
       continue;
     }
-    const color = arcColor(a, pal.mode);
+    const color = arcColor(a, pal.mode, pal.colors);
     let path = fills.get(color);
     if (!path) fills.set(color, (path = new Path2D()));
     addSegment(path, g, q.s, q.e, q.rIn, q.rOut);
@@ -85,7 +86,8 @@ export function drawLabels(ctx: CanvasRenderingContext2D, rings: Arc[][], g: Geo
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(flip ? mid + Math.PI : mid);
-      ctx.fillStyle = a.kind === "free" ? pal.quiet : ink;
+      // Age scales run from dark to bright, so pick the ink per segment there.
+      ctx.fillStyle = a.kind === "free" ? pal.quiet : pal.colors === "age" ? inkOn(arcColor(a, pal.mode, "age")) : ink;
       ctx.fillText(text, 0, 0);
       ctx.restore();
     }
@@ -113,11 +115,30 @@ export function drawCenter(ctx: CanvasRenderingContext2D, g: Geometry, pal: Pale
   ctx.textBaseline = "middle";
   ctx.fillStyle = pal.text;
   ctx.font = "600 13px system-ui, -apple-system, 'Segoe UI', sans-serif";
-  const room = g.r0 * 1.7;
+  // Stay inside the "scanned only" band, which runs just inside this circle.
+  const room = g.r0 * WEDGE_IN * 1.8;
   ctx.fillText(fit(ctx, name, room) ?? "", g.cx, g.cy - 9);
   ctx.fillStyle = pal.quiet;
   ctx.font = "12px system-ui, -apple-system, 'Segoe UI', sans-serif";
   ctx.fillText(size, g.cx, g.cy + 9);
+}
+
+/**
+ * Draws the "scanned only" band inside the center circle, from 12 o'clock to
+ * end. Filled while that view is on, outlined otherwise; stronger on hover.
+ */
+export function drawWedge(ctx: CanvasRenderingContext2D, g: Geometry, pal: Palette, end: number, on: boolean, hot: boolean): void {
+  const p = new Path2D();
+  addSegment(p, g, 0, Math.min(end, TAU - 1e-6), g.r0 * WEDGE_IN, g.r0 * WEDGE_OUT);
+  ctx.save();
+  ctx.globalAlpha = on || hot ? 0.9 : 0.45;
+  ctx.fillStyle = pal.accent;
+  if (on || hot) ctx.fill(p);
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = pal.mode === "contrast" ? 2 : 1.25;
+  ctx.strokeStyle = pal.accent;
+  ctx.stroke(p);
+  ctx.restore();
 }
 
 /** Outlines an arc and its ancestors. */

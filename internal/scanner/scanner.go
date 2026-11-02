@@ -71,7 +71,7 @@ func New(root string) (*Scan, error) {
 		return nil, fmt.Errorf("%s is not a directory", abs)
 	}
 	t := tree.New(abs)
-	t.SetOwn(tree.Root, e.Size)
+	t.SetOwn(tree.Root, e.Size, e.Mtime)
 	workers := 2 * runtime.NumCPU()
 	if workers < 4 {
 		workers = 4
@@ -107,7 +107,7 @@ func (s *Scan) Rescan(ctx context.Context, id tree.ID, onProgress func(Progress)
 	}
 	s.forget(id)
 	s.Tree.Clear(id)
-	s.Tree.SetOwn(id, e.Size)
+	s.Tree.SetOwn(id, e.Size, e.Mtime)
 	return s.walk(ctx, id, path, onProgress)
 }
 
@@ -170,6 +170,7 @@ type result struct {
 	path   string
 	bytes  int64
 	files  uint32
+	ftime  int64 // newest loose file
 	kids   []tree.Child
 	linked []linkedFile
 	err    error
@@ -225,13 +226,15 @@ func (s *Scan) read(j job) result {
 		switch {
 		case e.IsDir:
 			if s.boundary.Follow(e, filepath.Join(j.path, e.Name)) {
-				r.kids = append(r.kids, tree.Child{Name: e.Name, Own: e.Size})
+				r.kids = append(r.kids, tree.Child{Name: e.Name, Own: e.Size, Mtime: e.Mtime})
 			}
 		case e.Linked:
 			r.linked = append(r.linked, linkedFile{fileKey{e.Dev, e.Ino}, e.Size})
+			r.ftime = max(r.ftime, e.Mtime)
 		default:
 			r.bytes += e.Size
 			r.files++
+			r.ftime = max(r.ftime, e.Mtime)
 		}
 	}
 	return r
@@ -297,6 +300,13 @@ func (s *Scan) walk(ctx context.Context, start tree.ID, path string, onProgress 
 			err = ctx.Err()
 		case r := <-results:
 			pending--
+			// Some programs store a date ahead in the modification time (an image
+			// cache keeps its expiry there). Count such times as the scan's start, so
+			// a folder never looks newer than now.
+			r.ftime = min(r.ftime, began.Unix())
+			for i := range r.kids {
+				r.kids[i].Mtime = min(r.kids[i].Mtime, began.Unix())
+			}
 			s.seenMu.Lock()
 			for _, f := range r.linked {
 				if _, dup := s.seen[f.key]; dup {
@@ -307,7 +317,7 @@ func (s *Scan) walk(ctx context.Context, start tree.ID, path string, onProgress 
 				r.files++
 			}
 			s.seenMu.Unlock()
-			first := s.Tree.Add(r.id, r.bytes, r.files, r.kids, r.err != nil)
+			first := s.Tree.Add(r.id, r.bytes, r.files, r.ftime, r.kids, r.err != nil)
 			for i, k := range r.kids {
 				jobs.push(job{id: first + tree.ID(i), path: filepath.Join(r.path, k.Name)})
 				bytes.Add(k.Own)

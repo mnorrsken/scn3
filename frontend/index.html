@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>scn3</title>
+    <title>scn3 Disk Sunburst</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -15,6 +15,8 @@
         <button id="cancel" class="tool danger" title="Cancel the scan" aria-label="Cancel scan" hidden></button>
       </div>
       <nav id="crumbs" aria-label="Path"></nav>
+      <button id="labels" class="tool" aria-pressed="true" title="Show names in the chart"></button>
+      <button id="colors" class="tool" aria-pressed="false" title="Color by age: oldest to newest change"></button>
       <div class="theme">
         <button id="theme" class="tool" aria-haspopup="menu" aria-expanded="false" title="Theme"></button>
         <div id="theme-menu" class="popover" role="menu" hidden>
@@ -43,10 +45,15 @@
             <div class="bar"><div id="progress-bar"></div></div>
           </div>
           <div id="denied" hidden>
+            <button id="denied-close" class="close" aria-label="Dismiss" title="Dismiss"></button>
             <span id="denied-text"></span>
             <button id="privacy" hidden>Open Full Disk Access settings</button>
           </div>
           <canvas id="chart"></canvas>
+          <div id="legend" hidden>
+            <span>Older</span><div class="ramp"></div><span>Newer</span>
+            <small>compared within each folder</small>
+          </div>
           <p id="empty">Pick a drive or a folder to scan.</p>
         </div>
       </section>

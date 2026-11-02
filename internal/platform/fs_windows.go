@@ -68,6 +68,11 @@ type fileFullDirInfo struct {
 	FileName        [1]uint16
 }
 
+// filetimeToUnix converts 100 ns ticks since 1601 to Unix seconds.
+func filetimeToUnix(t int64) int64 {
+	return (t - 116444736000000000) / 10000000
+}
+
 // allowFileIDs lets tests force the listing without file IDs.
 var allowFileIDs = true
 
@@ -132,10 +137,12 @@ func ReadDir(path string) ([]Entry, error) {
 				info := (*fileIDBothDirInfo)(unsafe.Pointer(&buf[off]))
 				e.Name = windows.UTF16ToString(unsafe.Slice(&info.FileName[0], info.FileNameLength/2))
 				e.Size, e.Ino, attrs, next = info.AllocationSize, uint64(info.FileID), info.FileAttributes, info.NextEntryOffset
+				e.Mtime = filetimeToUnix(info.LastWriteTime)
 			} else {
 				info := (*fileFullDirInfo)(unsafe.Pointer(&buf[off]))
 				e.Name = windows.UTF16ToString(unsafe.Slice(&info.FileName[0], info.FileNameLength/2))
 				e.Size, attrs, next = info.AllocationSize, info.FileAttributes, info.NextEntryOffset
+				e.Mtime = filetimeToUnix(info.LastWriteTime)
 			}
 			if e.Name != "." && e.Name != ".." {
 				e.IsDir = attrs&windows.FILE_ATTRIBUTE_DIRECTORY != 0 && attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
@@ -175,6 +182,7 @@ func Stat(path string) (Entry, error) {
 		IsDir: fi.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0,
 		Dev:   uint64(fi.VolumeSerialNumber),
 		Ino:   uint64(fi.FileIndexHigh)<<32 | uint64(fi.FileIndexLow),
+		Mtime: fi.LastWriteTime.Nanoseconds() / 1e9,
 	}, nil
 }
 

@@ -13,6 +13,8 @@ import (
 type Settings struct {
 	Theme         string `json:"theme"` // system, light, dark or contrast
 	ShowAllDrives bool   `json:"showAllDrives"`
+	ColorMode     string `json:"colorMode"` // folders (by branch) or age (by last modification)
+	HideLabels    bool   `json:"hideLabels"`
 	Width         int    `json:"width"`
 	Height        int    `json:"height"`
 }
@@ -81,6 +83,20 @@ func (a *App) SetTheme(theme string) error {
 func (a *App) SetShowAllDrives(show bool) error {
 	s := LoadSettings()
 	s.ShowAllDrives = show
+	return SaveSettings(s)
+}
+
+// SetColorMode saves how the chart is coloured: "folders" or "age".
+func (a *App) SetColorMode(mode string) error {
+	s := LoadSettings()
+	s.ColorMode = mode
+	return SaveSettings(s)
+}
+
+// SetHideLabels saves whether the chart leaves out folder and file names.
+func (a *App) SetHideLabels(hide bool) error {
+	s := LoadSettings()
+	s.HideLabels = hide
 	return SaveSettings(s)
 }
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.1] - 2026-11-02
+
+### Changed
+
+- The app is called "scn3 Disk Sunburst" in its window title and on Linux menus. Commands, files and packages are still named scn3.
+
+### Added
+
+- Color by age: the clock button colors each file and folder by its newest change, compared within each folder: blue, yellow, red in the light theme, plasma in the dark theme and viridis in high contrast, old to new. A folder counts as new as the newest file or folder inside it. The hover text shows the date.
+- The `scan --json` output has a `modified` time for each folder.
+- The notice about folders that could not be read has a close button. It comes back for a new scan or when the count changes.
+- Dates show as YYYY-MM-DD. A file dated in the future (some caches store an expiry date there) is marked so, and counts as changed now for its folder and the age colors.
+- A button to hide the folder and file names in the chart; the center keeps its name and size.
+- At a drive's root, a band inside the center circle shows the scanned part. Click it to let the scanned folders fill the whole circle without free and not-scanned space; click again to bring them back.
+
 ## [0.9.0] - 2026-11-02
 
 ### Changed

@@ -295,6 +295,7 @@ func placeFiles(s *session, id tree.ID, v *tree.ViewNode, files []platform.Entry
 			Files: 1,
 			Kind:  KindFile,
 			Path:  filepath.Join(dir, e.Name),
+			Mtime: e.Mtime,
 		})
 		sum += e.Size
 	}
@@ -322,6 +323,7 @@ func placeFiles(s *session, id tree.ID, v *tree.ViewNode, files []platform.Entry
 		}
 		other.Size += rest
 		other.Files += max(ownFiles-int64(len(shown)), 0)
+		other.Mtime = max(other.Mtime, s.scan.Tree.FilesTime(id))
 	}
 	if other != nil {
 		kids = append(kids, other)

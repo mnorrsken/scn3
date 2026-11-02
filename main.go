@@ -40,7 +40,7 @@ func main() {
 	settings := desktop.LoadSettings()
 
 	err := wails.Run(&options.App{
-		Title:     "scn3",
+		Title:     "scn3 Disk Sunburst",
 		Width:     settings.Width,
 		Height:    settings.Height,
 		MinWidth:  640,

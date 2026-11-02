@@ -1,6 +1,19 @@
-# scn3
+# scn3 Disk Sunburst: see what fills your disk
 
-scn3 shows disk usage as a sunburst chart. It is a desktop app (Go and Wails v2, with a TypeScript and Canvas UI) and a small command line tool.
+scn3 shows disk usage as a sunburst chart, on Windows, macOS and Linux. It is a desktop app (Go and Wails v2, with a TypeScript and Canvas UI) and a small command line tool.
+
+![scn3 showing /System/Library as a sunburst: each ring is one folder level deeper, each color one top-level folder](docs/screenshots/folders.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/drive-free-space.png" alt="A whole drive: the used part is colored, free space is the empty arc"></td>
+    <td width="50%"><img src="docs/screenshots/age-colors.png" alt="The same folder colored by age, from purple (oldest change) to yellow (newest)"></td>
+  </tr>
+  <tr>
+    <td>A whole drive: used space in color, free space as the empty arc.</td>
+    <td>Color by age: oldest changes purple, newest yellow, compared within each folder.</td>
+  </tr>
+</table>
 
 ## Features
 
@@ -12,6 +25,9 @@ scn3 shows disk usage as a sunburst chart. It is a desktop app (Go and Wails v2,
 - Context menu: Zoom, Open, Copy path, Rescan, Hide, Move to Trash.
 - Modern look with light, dark and high-contrast themes (System follows the OS, including its "increase contrast" setting).
 - Drives show an icon for their type: system, internal, external (USB, SD), network share, optical disc or disk image. Disk images, extra system volumes (such as macOS Recovery) and boot, snap and container mounts on Linux are listed only with "Show all drives" on.
+- Color by age (the clock button): each file and folder is colored by its newest change, old to new (blue, yellow, red in the light theme; plasma in dark; viridis in high contrast), compared only with the items next to it in the same folder. Ages are read during every scan at no extra cost.
+- Names in the chart can be turned off with the tag button.
+- At a drive's root, click the band inside the center circle to see only the scanned space fill the circle, without free and not-scanned space.
 - Large files show as their own segments, so they are easy to spot and move to the Trash. The folder in the center always shows its files; further out, a folder shows its files when they take up a visible part of the chart, otherwise they are an empty part of its arc.
 - Drive list.
 - Light and dark theme.

@@ -33,6 +33,7 @@ type Entry struct {
 	Dev    uint64 // device or volume number
 	Ino    uint64 // inode or file ID
 	Linked bool   // may share its blocks with another file (hard link, clone), so count once per (Dev, Ino)
+	Mtime  int64  // last modification, Unix seconds
 }
 
 // Boundary decides which subdirectories a scan may enter.

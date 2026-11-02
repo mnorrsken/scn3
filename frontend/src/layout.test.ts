@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Kind, ViewNode } from "./backend";
-import { arcColor, findArc, formatBytes, FULL, geometry, hitTest, layout, lerpDomain, pathOf, TAU, zoomScene } from "./layout";
+import { arcColor, findArc, formatBytes, formatDate, FULL, geometry, heatColor, hitTest, inkOn, inWedge, scannedEnd, WEDGE_IN, WEDGE_OUT, layout, lerpDomain, pathOf, TAU, zoomScene } from "./layout";
 
 const n = (name: string, size: number, kids?: ViewNode[], kind: Kind = "dir", ref = 1): ViewNode => ({
   ref,
@@ -77,6 +77,65 @@ describe("layout", () => {
   });
 });
 
+describe("age colours", () => {
+  const dated = (name: string, mtime: number, kind: Kind = "dir"): ViewNode => ({ ...n(name, 10, undefined, kind), mtime });
+
+  it("ranks siblings from cold to hot, relative to each other", () => {
+    const day = 86400;
+    const r = layout(n("r", 30, [dated("new", 1000 * day), dated("mid", 990 * day), dated("old", 10 * day, "file")]), 300);
+    const heat = Object.fromEntries(r[0].map((a) => [a.name, a.heat]));
+    expect(heat.new).toBe(1);
+    expect(heat.old).toBe(0);
+    expect(heat.mid).toBeGreaterThan(0.4); // ten days older than the newest, out of ~1000: still warm
+    expect(heat.mid).toBeLessThan(1);
+  });
+
+  it("uses only siblings in the same folder", () => {
+    const r = layout(n("r", 20, [
+      { ...n("a", 10, [dated("a1", 100), dated("a2", 200)]), mtime: 200 },
+      { ...n("b", 10, [dated("b1", 5000), dated("b2", 9000)]), mtime: 9000 },
+    ]), 300);
+    const heat = Object.fromEntries(r[1].map((x) => [x.name, x.heat]));
+    expect(heat.a2).toBe(1); // newest in a, though older than everything in b
+    expect(heat.b1).toBe(0);
+  });
+
+  it("gives a lone item its parent's heat", () => {
+    const r = layout(n("r", 20, [
+      { ...n("old", 10, [dated("only", 100)]), mtime: 100 },
+      { ...n("new", 10, [dated("x", 9000)]), mtime: 9000 },
+    ]), 300);
+    const heat = Object.fromEntries(r[1].map((x) => [x.name, x.heat]));
+    expect(heat.only).toBe(0);
+    expect(heat.x).toBe(1);
+  });
+
+  it("puts a lone or undated item in the middle or leaves it grey", () => {
+    const r = layout(n("r", 20, [dated("only", 500), n("undated", 10)]), 300);
+    expect(r[0].find((a) => a.name === "only")!.heat).toBe(0.5);
+    const undated = r[0].find((a) => a.name === "undated")!;
+    expect(undated.heat).toBe(-1);
+    expect(arcColor(undated, "light", "age")).toBe(arcColor({ ...undated, kind: "other" }, "light"));
+  });
+
+  it("goes blue, yellow, red in light mode and up plasma and viridis otherwise", () => {
+    expect(heatColor(0, "light")).toBe("rgb(47 95 168)");
+    expect(heatColor(0.5, "light")).toBe("rgb(242 209 76)");
+    expect(heatColor(1, "light")).toBe("rgb(163 31 31)");
+    expect(heatColor(1, "dark")).toBe("rgb(240 249 33)"); // plasma's yellow end
+    expect(heatColor(1, "contrast")).toBe("rgb(253 231 37)"); // viridis's yellow end
+    // The oldest end is trimmed so it stays visible on dark backgrounds.
+    expect(heatColor(0, "dark")).not.toBe("rgb(13 8 135)");
+  });
+
+  it("picks readable label ink", () => {
+    expect(inkOn("rgb(240 249 33)")).toBe("#111");
+    expect(inkOn("rgb(75 3 161)")).toBe("#fff");
+    expect(inkOn("hsl(0 72% 46%)")).toBe("#fff");
+    expect(inkOn("hsl(120 72% 70%)")).toBe("#111");
+  });
+});
+
 describe("hitTest", () => {
   const g = geometry(800, 800);
   const rings = layout(tree, g.R);
@@ -97,6 +156,25 @@ describe("hitTest", () => {
     expect(hitTest(rings, g, g.cx + g.R + 5, g.cy)).toBeNull();
     // b has no children, so its next ring is empty.
     expect(hitTest(rings, g, ...at(TAU * 0.8, 1))).toBeNull();
+  });
+});
+
+describe("scanned-only wedge", () => {
+  const vol = n("vol", 100, [n("used", 30), n("not scanned", 10, undefined, "unscanned", -1), n("free", 60, undefined, "free", -1)]);
+  const g = geometry(800, 800);
+
+  it("ends where free and not-scanned space start", () => {
+    expect(scannedEnd(layout(vol, g.R))).toBeCloseTo(TAU * 0.3);
+    expect(scannedEnd(layout(tree, g.R))).toBeNull();
+  });
+
+  it("is hit only on its band and within its angle", () => {
+    const end = TAU * 0.3;
+    const r = g.r0 * ((WEDGE_IN + WEDGE_OUT) / 2);
+    const at = (angle: number, radius = r) => [g.cx + radius * Math.sin(angle), g.cy - radius * Math.cos(angle)] as const;
+    expect(inWedge(g, ...at(0.5), end)).toBe(true);
+    expect(inWedge(g, ...at(TAU * 0.5), end)).toBe(false);
+    expect(inWedge(g, ...at(0.5, g.r0 * 0.3), end)).toBe(false);
   });
 });
 
@@ -132,6 +210,11 @@ describe("text", () => {
   it("uses a node's own path when it has one", () => {
     const r = layout(n("all", 1, [{ ...n("vol", 1, [n("sub", 1)]), path: "/mnt/x" }]), 300);
     expect(pathOf(r[1][0], "", "/")).toBe("/mnt/x/sub");
+  });
+
+  it("formats dates the same way everywhere", () => {
+    expect(formatDate(new Date(2026, 8, 11, 15, 30).getTime() / 1000)).toBe("2026-09-11");
+    expect(formatDate(new Date(2026, 0, 2).getTime() / 1000)).toBe("2026-01-02");
   });
 
   it("formats sizes", () => {

@@ -59,6 +59,7 @@ func entryOf(name string, st *unix.Stat_t) Entry {
 		Dev:    uint64(st.Dev),
 		Ino:    st.Ino,
 		Linked: !isDir && st.Nlink > 1,
+		Mtime:  st.Mtim.Sec,
 	}
 }
 

@@ -4,7 +4,10 @@ const paths: Record<string, string> = {
   up: '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>',
   back: '<path d="M19 12H5M11.5 5.5 5 12l6.5 6.5"/>',
   rescan: '<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>',
+  close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   cancel: '<rect x="6.5" y="6.5" width="11" height="11" rx="2"/>',
+  labels: '<path d="M3.5 11.8V5a1.5 1.5 0 0 1 1.5-1.5h6.8l8.7 8.7a1.5 1.5 0 0 1 0 2.1l-6.2 6.2a1.5 1.5 0 0 1-2.1 0z"/><circle cx="8" cy="8" r="1.3"/>',
+  age: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   // Themes
   system: '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9 20h6M12 16.5V20"/>',
