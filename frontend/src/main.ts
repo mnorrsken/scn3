@@ -1,4 +1,4 @@
-import { api, dialogs, onProgress, SummaryRef, type Progress, type View, type Volume } from "./backend";
+import { api, copyText, dialogs, onProgress, type Progress, type View, type Volume } from "./backend";
 import {
   FULL, findArc, formatBytes, geometry, hitTest, layout, lerpDomain, MAX_DEPTH, minFraction, pathOf, zoomScene,
   type Arc, type Domain, type Geometry, type Mode,
@@ -25,7 +25,7 @@ let hover: Arc | null = null;
 let dpr = 1;
 let dirty = true;
 let tween: { arcs: Arc[]; from: Domain; to: Domain; start: number; done: () => void } | null = null;
-let summaryMode = false;
+let showAllDrives = false;
 let platform = "";
 let themeChoice = "system";
 let refetchTimer = 0;
@@ -134,7 +134,7 @@ function frame(now: number): void {
 }
 
 function resize(): void {
-  const box = $("stage").getBoundingClientRect();
+  const box = $("area").getBoundingClientRect();
   dpr = window.devicePixelRatio || 1;
   for (const c of [canvas, base]) {
     c.width = Math.round(box.width * dpr);
@@ -147,7 +147,7 @@ function resize(): void {
   // The cull limit depends on the radius, so a bigger chart can show more.
   if (geom.R !== R && view) refetchSoon(150);
 }
-new ResizeObserver(resize).observe($("stage"));
+new ResizeObserver(resize).observe($("area"));
 
 // ---- view ----
 
@@ -237,7 +237,6 @@ async function navigate(ref: number, push = true): Promise<void> {
 function up(): void {
   if (!view) return;
   if (view.parent >= 0) void navigate(view.parent);
-  else if (summaryMode && nav.current !== SummaryRef) void navigate(SummaryRef);
 }
 
 function back(): void {
@@ -246,7 +245,6 @@ function back(): void {
 }
 
 async function scan(path: string): Promise<void> {
-  summaryMode = false;
   try {
     const ref = await api().Scan(path);
     scans.set(path, ref);
@@ -261,38 +259,10 @@ async function scan(path: string): Promise<void> {
 
 async function rescan(ref: number): Promise<void> {
   try {
-    if (ref === SummaryRef) {
-      await startSummaryScans(true);
-    } else {
-      await api().Rescan(ref);
-      progressScan = ref;
-    }
+    await api().Rescan(ref);
+    progressScan = ref;
     updateChrome();
     refetchSoon(50);
-  } catch (err) {
-    report(err);
-  }
-}
-
-/** The drives that "All local drives" combines: no network shares or discs. */
-const localVolumes = (): Volume[] => volumes.filter((v) => v.kind !== "network" && v.kind !== "optical");
-
-async function startSummaryScans(all: boolean): Promise<void> {
-  if (all) active.clear();
-  for (const v of localVolumes()) {
-    if (all || !scans.has(v.path)) {
-      scans.set(v.path, await api().Scan(v.path));
-    }
-  }
-}
-
-async function enterSummary(): Promise<void> {
-  summaryMode = true;
-  renderVolumes();
-  try {
-    await startSummaryScans(false);
-    nav.reset(SummaryRef);
-    show(await fetchView(SummaryRef));
   } catch (err) {
     report(err);
   }
@@ -330,13 +300,22 @@ async function hide(arc: Arc): Promise<void> {
   }
 }
 
+async function copyPath(arc: Arc): Promise<void> {
+  try {
+    if (await copyText(arcPath(arc))) toast("Path copied");
+    else report("Could not copy the path");
+  } catch (err) {
+    report(err);
+  }
+}
+
 const arcPath = (a: Arc): string => (view ? pathOf(a, view.root.path ?? "", view.sep) : a.name);
 
 // ---- chrome ----
 
 function updateChrome(): void {
   const v = view;
-  $<HTMLButtonElement>("up").disabled = !v || (v.parent < 0 && !(summaryMode && nav.current !== SummaryRef));
+  $<HTMLButtonElement>("up").disabled = !v || v.parent < 0;
   $<HTMLButtonElement>("back").disabled = !nav.canGoBack;
   $<HTMLButtonElement>("rescan").disabled = !v || v.scanning;
   $("cancel").hidden = !v?.scanning;
@@ -362,31 +341,36 @@ function updateChrome(): void {
   renderVolumes();
 }
 
+function setInfo(where: string, facts: string): void {
+  const strong = Object.assign(document.createElement("span"), { className: "where", textContent: where });
+  const rest = Object.assign(document.createElement("span"), { className: "facts", textContent: facts });
+  $("info").replaceChildren(strong, rest);
+}
+
 function showInfo(): void {
-  const info = $("info");
   const v = view;
   if (!v) {
-    info.textContent = "";
-    return;
-  }
-  const a = hover;
-  if (!a) {
-    info.textContent = `${v.root.path || v.root.name}  ·  ${formatBytes(v.root.size)}  ·  ${v.root.files.toLocaleString()} files`;
-    return;
-  }
-  if (a.kind === "free") {
-    info.textContent = `Free on ${v.root.name}: ${formatBytes(a.size)}`;
-    return;
-  }
-  if (a.kind === "unscanned") {
-    info.textContent = `Used on ${v.root.name} but not found by the scan: ${formatBytes(a.size)}`;
+    $("info").replaceChildren();
     return;
   }
   const count = (n: number) => `${n.toLocaleString()} ${n === 1 ? "file" : "files"}`;
+  const a = hover;
+  if (!a) {
+    setInfo(v.root.path || v.root.name, `${formatBytes(v.root.size)}  ·  ${count(v.root.files)}`);
+    return;
+  }
+  if (a.kind === "free") {
+    setInfo(`Free on ${v.root.name}`, formatBytes(a.size));
+    return;
+  }
+  if (a.kind === "unscanned") {
+    setInfo(`Used on ${v.root.name} but not found by the scan`, formatBytes(a.size));
+    return;
+  }
   const parentSize = a.parent?.size ?? v.root.size;
   const pct = (part: number, whole: number) => (whole > 0 ? `${((100 * part) / whole).toFixed(1)}%` : "–");
   const where = a.kind === "other" ? `Small items in ${arcPath(a.parent ?? a)}` : arcPath(a);
-  info.textContent = `${where}  ·  ${formatBytes(a.size)}  ·  ${count(a.files)}  ·  ${pct(a.size, parentSize)} of parent  ·  ${pct(a.size, v.volumeBytes)} of volume`;
+  setInfo(where, `${formatBytes(a.size)}  ·  ${count(a.files)}  ·  ${pct(a.size, parentSize)} of parent  ·  ${pct(a.size, v.volumeBytes)} of volume`);
 }
 
 /** Status line of a drive card: scan progress while scanning, free space otherwise. */
@@ -399,7 +383,7 @@ function driveStatus(ref: number | undefined, free: number, capacity: number): [
 function driveCard(iconName: string, name: string, status: [string, boolean], used: number, capacity: number, isActive: boolean, onClick: () => void): HTMLLIElement {
   const li = document.createElement("li");
   const b = document.createElement("button");
-  b.className = `drive${iconName === "drive-all" ? " all" : ""}${isActive ? " active" : ""}${status[1] ? " scanning" : ""}`;
+  b.className = `drive${isActive ? " active" : ""}${status[1] ? " scanning" : ""}`;
   b.innerHTML = icon(iconName);
   const label = Object.assign(document.createElement("span"), { className: "name", textContent: name });
   const small = Object.assign(document.createElement("small"), { textContent: status[0] });
@@ -416,30 +400,17 @@ function driveCard(iconName: string, name: string, status: [string, boolean], us
 function renderVolumes(): void {
   const list = $("volumes");
   list.replaceChildren();
-  const local = localVolumes();
-  if (local.length > 1) {
-    const capacity = local.reduce((n, v) => n + v.capacity, 0);
-    const free = local.reduce((n, v) => n + v.free, 0);
-    const scanningAll = summaryMode && local.some((v) => driveStatus(scans.get(v.path), 0, 0)[1]);
-    const status: [string, boolean] = scanningAll ? ["Scanning…", true] : [`${formatBytes(free)} free of ${formatBytes(capacity)}`, false];
-    list.append(driveCard("drive-all", "All local drives", status, capacity - free, capacity, summaryMode, () => {
-      if (!summaryMode) void enterSummary();
-    }));
-  }
   for (const vol of volumes) {
     const ref = scans.get(vol.path);
-    const isActive = !summaryMode && ref !== undefined && view?.crumbs[0]?.ref === ref;
+    const isActive = ref !== undefined && view?.crumbs[0]?.ref === ref;
+    // A hidden drive stays listed while it is the one on screen.
+    if (vol.hidden && !showAllDrives && !isActive) continue;
     list.append(driveCard(`drive-${vol.kind}`, vol.name, driveStatus(ref, vol.free, vol.capacity), vol.capacity - vol.free, vol.capacity, isActive, () => {
       if (ref === undefined) {
         void scan(vol.path);
         return;
       }
-      if (summaryMode) {
-        summaryMode = false;
-        nav.reset(ref);
-      } else {
-        nav.go(ref);
-      }
+      nav.go(ref);
       void refresh();
     }));
   }
@@ -456,14 +427,10 @@ async function loadVolumes(): Promise<void> {
 
 function handleProgress(p: Progress): void {
   active.set(p.scan, p);
-  // In the Summary several volumes scan at once, so show their sum.
-  const shown = summaryMode ? [...active.values()] : [p];
-  const files = shown.reduce((n, x) => n + x.files, 0);
-  const bytes = shown.reduce((n, x) => n + x.bytes, 0);
-  const finished = shown.every((x) => x.done);
+  const { files, bytes, done: finished } = p;
   $("progress-text").textContent = `${finished ? "Finished" : "Scanning…"} ${files.toLocaleString()} files, ${formatBytes(bytes)}`;
   const bar = $("progress-bar");
-  const target = summaryMode ? localVolumes() : volumes.filter((v) => scans.get(v.path) === p.scan);
+  const target = volumes.filter((v) => scans.get(v.path) === p.scan);
   const used = target.reduce((n, v) => n + v.capacity - v.free, 0);
   if (used > 0) {
     bar.classList.remove("unknown");
@@ -530,11 +497,13 @@ canvas.addEventListener("contextmenu", (e) => {
     arc.kind === "file"
       ? [
           ["Open in file manager", () => void api().RevealFile(arc.ref, arc.name).catch(report), true],
+          ["Copy path", () => void copyPath(arc), true],
           ["Move to Trash…", () => void trash(arc), !busy, "danger"],
         ]
       : [
           ["Zoom", () => void navigate(arc.ref), true],
           ["Open in file manager", () => void api().Reveal(arc.ref).catch(report), true],
+          ["Copy path", () => void copyPath(arc), true],
           ["Rescan", () => void rescan(arc.ref), !busy],
           ["Hide", () => void hide(arc), !busy],
           ["Move to Trash…", () => void trash(arc), !busy, "danger"],
@@ -590,10 +559,6 @@ $("rescan").onclick = () => {
   if (nav.current !== null) void rescan(nav.current);
 };
 $("cancel").onclick = () => {
-  if (summaryMode) {
-    for (const ref of scans.values()) void api().Cancel(ref);
-    return;
-  }
   const target = progressScan ?? nav.current;
   if (target !== null) void api().Cancel(target);
 };
@@ -606,6 +571,11 @@ $("folder").onclick = async () => {
   }
 };
 $("privacy").onclick = () => void dialogs().OpenPrivacySettings();
+$<HTMLInputElement>("show-all").onchange = (e) => {
+  showAllDrives = (e.target as HTMLInputElement).checked;
+  renderVolumes();
+  void api().SetShowAllDrives(showAllDrives).catch(report);
+};
 const themeMenu = $<HTMLDivElement>("theme-menu");
 function setThemeMenu(open: boolean): void {
   themeMenu.hidden = !open;
@@ -638,6 +608,8 @@ async function start(): Promise<void> {
     const [settings, os] = await Promise.all([api().Settings(), api().Platform()]);
     platform = os;
     themeChoice = settings.theme;
+    showAllDrives = settings.showAllDrives;
+    $<HTMLInputElement>("show-all").checked = showAllDrives;
     applyTheme();
   } catch (err) {
     report(err);

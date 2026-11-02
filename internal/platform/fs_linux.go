@@ -106,6 +106,26 @@ func volumeKind(m mount, sysfs string) string {
 	return KindInternal
 }
 
+// Mounts below these paths hold boot files, system state or container and snap
+// storage: real filesystems, but not drives people look for.
+var hiddenPrefixes = []string{
+	"/boot", "/dev", "/proc", "/run", "/snap", "/sys",
+	"/var/lib/containers", "/var/lib/docker", "/var/lib/kubelet", "/var/lib/lxd", "/var/lib/snapd", "/var/snap",
+}
+
+// hiddenMount reports whether m is listed only when all drives are shown.
+func hiddenMount(m mount, kind string) bool {
+	if kind == KindImage || (strings.HasPrefix(m.fs, "fuse.") && kind != KindNetwork) {
+		return true
+	}
+	for _, p := range hiddenPrefixes {
+		if m.path == p || strings.HasPrefix(m.path, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // unescapeMount decodes the \040-style octal escapes of mountinfo.
 func unescapeMount(s string) string {
 	if !strings.Contains(s, `\`) {
@@ -142,7 +162,8 @@ func Volumes() ([]Volume, error) {
 		if err != nil || capacity == 0 {
 			continue
 		}
-		out = append(out, Volume{Path: m.path, Name: m.path, FS: m.fs, Kind: volumeKind(m, "/sys"), Capacity: capacity, Free: free})
+		kind := volumeKind(m, "/sys")
+		out = append(out, Volume{Path: m.path, Name: m.path, FS: m.fs, Kind: kind, Hidden: hiddenMount(m, kind), Capacity: capacity, Free: free})
 	}
 	return out, nil
 }

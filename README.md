@@ -9,11 +9,11 @@ scn3 shows disk usage as a sunburst chart. It is a desktop app (Go and Wails v2,
 - Hover to see name and size.
 - Click to zoom, with animation.
 - Up, Back and Rescan buttons, and a breadcrumb.
-- Context menu: Zoom, Open, Rescan, Hide, Move to Trash.
+- Context menu: Zoom, Open, Copy path, Rescan, Hide, Move to Trash.
 - Modern look with light, dark and high-contrast themes (System follows the OS, including its "increase contrast" setting).
-- Drives show an icon for their type: system, internal, external (USB, SD), network share, optical disc or disk image. "All local drives" combines the local ones; network shares and discs are left out of it and scanned only when clicked.
+- Drives show an icon for their type: system, internal, external (USB, SD), network share, optical disc or disk image. Disk images, extra system volumes (such as macOS Recovery) and boot, snap and container mounts on Linux are listed only with "Show all drives" on.
 - Large files show as their own segments, so they are easy to spot and move to the Trash. The folder in the center always shows its files; further out, a folder shows its files when they take up a visible part of the chart, otherwise they are an empty part of its arc.
-- Volume list and Summary.
+- Drive list.
 - Light and dark theme.
 - Settings file.
 
@@ -84,6 +84,10 @@ Signing secrets are optional. Without them, builds are unsigned.
 - macOS: `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`
 - Windows: `WINDOWS_CERT_PFX`, `WINDOWS_CERT_PASSWORD`
 
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately, as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
-Apache-2.0. See `LICENSE`.
+Apache-2.0. See `LICENSE`. Each release includes `THIRD_PARTY_NOTICES.txt` with the licenses of the third-party code in the binaries (all MIT, BSD or Apache-2.0).

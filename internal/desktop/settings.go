@@ -11,9 +11,10 @@ import (
 
 // Settings are the saved preferences.
 type Settings struct {
-	Theme  string `json:"theme"` // system, light or dark
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
+	Theme         string `json:"theme"` // system, light, dark or contrast
+	ShowAllDrives bool   `json:"showAllDrives"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
 }
 
 // DefaultSettings is used when nothing has been saved yet.
@@ -73,6 +74,13 @@ func (a *App) Settings() Settings { return LoadSettings() }
 func (a *App) SetTheme(theme string) error {
 	s := LoadSettings()
 	s.Theme = theme
+	return SaveSettings(s)
+}
+
+// SetShowAllDrives saves whether hidden volumes (disk images, system volumes) are listed.
+func (a *App) SetShowAllDrives(show bool) error {
+	s := LoadSettings()
+	s.ShowAllDrives = show
 	return SaveSettings(s)
 }
 

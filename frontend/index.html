@@ -30,19 +30,25 @@
         <h2>Drives</h2>
         <ul id="volumes"></ul>
         <button id="folder" class="wide"></button>
+        <label class="switch" title="Also list disk images, system volumes, and boot and container mounts">
+          <input type="checkbox" id="show-all" role="switch" />
+          <span>Show all drives</span>
+        </label>
       </aside>
       <section id="stage">
         <div id="info" aria-live="polite"></div>
-        <div id="progress" hidden>
-          <div id="progress-text"></div>
-          <div class="bar"><div id="progress-bar"></div></div>
+        <div id="area">
+          <div id="progress" hidden>
+            <div id="progress-text"></div>
+            <div class="bar"><div id="progress-bar"></div></div>
+          </div>
+          <div id="denied" hidden>
+            <span id="denied-text"></span>
+            <button id="privacy" hidden>Open Full Disk Access settings</button>
+          </div>
+          <canvas id="chart"></canvas>
+          <p id="empty">Pick a drive or a folder to scan.</p>
         </div>
-        <div id="denied" hidden>
-          <span id="denied-text"></span>
-          <button id="privacy" hidden>Open Full Disk Access settings</button>
-        </div>
-        <canvas id="chart"></canvas>
-        <p id="empty">Pick a drive or a folder to scan.</p>
       </section>
     </main>
     <div id="menu" class="popover" role="menu" hidden></div>

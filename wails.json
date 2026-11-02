@@ -8,5 +8,11 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": { "name": "Martin Norrsken", "email": "46407660+mnorrsken@users.noreply.github.com" },
-  "info": { "productName": "scn3", "companyName": "mnorrsken", "comments": "Sunburst disk usage analyzer" }
+  "info": {
+    "productName": "scn3",
+    "productVersion": "0.0.0",
+    "companyName": "mnorrsken",
+    "copyright": "Copyright 2026 Martin Norrsken",
+    "comments": "Sunburst disk usage analyzer"
+  }
 }

@@ -33,6 +33,7 @@ export interface Volume {
   name: string;
   fs: string;
   kind: "system" | "internal" | "external" | "network" | "optical" | "image";
+  hidden: boolean;
   capacity: number;
   free: number;
 }
@@ -49,6 +50,7 @@ export interface Progress {
 
 export interface Settings {
   theme: string;
+  showAllDrives: boolean;
   width: number;
   height: number;
 }
@@ -66,6 +68,7 @@ interface Api {
   View(ref: number, maxDepth: number, minFrac: number): Promise<View>;
   Settings(): Promise<Settings>;
   SetTheme(theme: string): Promise<void>;
+  SetShowAllDrives(show: boolean): Promise<void>;
   Platform(): Promise<string>;
 }
 
@@ -77,13 +80,15 @@ interface DialogsApi {
 declare global {
   interface Window {
     go: { desktop: { App: Api }; main: { Dialogs: DialogsApi } };
-    runtime: { EventsOn(name: string, cb: (data: never) => void): void };
+    runtime: {
+      EventsOn(name: string, cb: (data: never) => void): void;
+      ClipboardSetText(text: string): Promise<boolean>;
+    };
   }
 }
 
-export const SummaryRef = -2;
-
 export const api = (): Api => window.go.desktop.App;
 export const dialogs = (): DialogsApi => window.go.main.Dialogs;
+export const copyText = (text: string): Promise<boolean> => window.runtime.ClipboardSetText(text);
 export const onProgress = (cb: (p: Progress) => void): void =>
   window.runtime.EventsOn("scan:progress", cb as (data: never) => void);

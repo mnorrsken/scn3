@@ -9,7 +9,7 @@ ifeq ($(UNAME),Linux)
 WAILS_TAGS := -tags webkit2_41
 endif
 
-.PHONY: build build-cli run test go-test ui-test vet fmt race lint vuln dist clean
+.PHONY: build build-cli run test go-test ui-test vet fmt race lint vuln dist notices clean
 
 # The desktop app, in build/bin.
 build:
@@ -55,5 +55,9 @@ dist: vuln
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o dist/scan-$$os-$$arch$$ext ./cmd/scan || exit 1; \
 	done
 
+# Licenses of the third-party code in the binaries; releases attach this file.
+notices:
+	@scripts/third-party-notices.sh > THIRD_PARTY_NOTICES.txt
+
 clean:
-	rm -rf bin dist build/bin frontend/wailsjs
+	rm -rf bin dist build/bin frontend/wailsjs THIRD_PARTY_NOTICES.txt

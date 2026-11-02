@@ -20,6 +20,7 @@ type Volume struct {
 	Name     string `json:"name"`
 	FS       string `json:"fs"`
 	Kind     string `json:"kind"`
+	Hidden   bool   `json:"hidden"` // not a drive people think of: disk images, system and container mounts
 	Capacity int64  `json:"capacity"`
 	Free     int64  `json:"free"`
 }

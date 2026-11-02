@@ -99,6 +99,30 @@ func TestVolumeKind(t *testing.T) {
 	}
 }
 
+func TestHiddenMounts(t *testing.T) {
+	for _, c := range []struct {
+		m      mount
+		kind   string
+		hidden bool
+	}{
+		{mount{"8:2", "/", "ext4"}, KindSystem, false},
+		{mount{"0:40", "/home", "btrfs"}, KindInternal, false},
+		{mount{"8:17", "/media/me/usb", "exfat"}, KindExternal, false},
+		{mount{"0:55", "/mnt/nas", "cifs"}, KindNetwork, false},
+		{mount{"0:56", "/mnt/nas2", "fuse.sshfs"}, KindNetwork, false},
+		{mount{"8:1", "/boot/efi", "vfat"}, KindInternal, true},
+		{mount{"8:3", "/boot", "ext4"}, KindInternal, true},
+		{mount{"8:4", "/bootstrap", "ext4"}, KindInternal, false},
+		{mount{"7:3", "/media/iso", "iso9660"}, KindImage, true},
+		{mount{"0:60", "/var/lib/docker/volumes/x", "ext4"}, KindInternal, true},
+		{mount{"0:61", "/run/user/1000/doc", "fuse.portal"}, KindInternal, true},
+	} {
+		if got := hiddenMount(c.m, c.kind); got != c.hidden {
+			t.Errorf("%s: hidden = %v, want %v", c.m.path, got, c.hidden)
+		}
+	}
+}
+
 func TestTrashFollowsSpec(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))

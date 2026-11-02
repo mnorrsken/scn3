@@ -140,25 +140,58 @@ h2 { margin: 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; t
 .drive.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
 .drive.active .icon { color: var(--accent); }
 .drive.scanning small { color: var(--accent); }
-.drive.all { border-style: dashed; }
-.drive.all.active { border-style: solid; }
 .wide { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; border: var(--border) solid var(--line); background: var(--raised); padding: 8px; }
 
-#stage { flex: 1; min-width: 0; position: relative; }
-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-#info {
+.switch { display: flex; align-items: center; gap: 8px; margin: 2px 4px; color: var(--quiet); cursor: pointer; }
+.switch input {
+  appearance: none;
+  flex: none;
+  width: 30px;
+  height: 18px;
+  margin: 0;
+  border-radius: 9px;
+  background: var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch input::after {
+  content: "";
   position: absolute;
-  z-index: 1;
-  left: 16px;
-  right: 16px;
-  top: 12px;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  transition: transform 0.15s;
+}
+.switch input:checked { background: var(--accent); }
+.switch input:checked::after { transform: translateX(12px); }
+.switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-theme="contrast"] .switch input { border: 2px solid var(--line); background: #000; }
+:root[data-theme="contrast"] .switch input::after { top: 0; left: 0; background: var(--text); }
+:root[data-theme="contrast"] .switch input:checked { background: var(--accent); }
+
+#stage { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#info {
+  flex: none;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  min-height: 38px;
+  padding: 10px 16px;
+  border-bottom: var(--border) solid var(--line);
   color: var(--quiet);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   user-select: text;
-  pointer-events: none;
 }
+#info .where { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#info .facts { flex: none; }
+#area { flex: 1; min-height: 0; position: relative; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; color: var(--quiet); pointer-events: none; }
 #progress, #denied {
   position: absolute;
@@ -189,4 +222,6 @@ dialog form button { border-color: var(--line); }
 #confirm-ok { color: #fff; background: var(--danger); border-color: var(--danger); }
 :root[data-theme="contrast"] #confirm-ok { color: #000; }
 [hidden] { display: none !important; }
-@media (prefers-reduced-motion: reduce) { #progress-bar, #progress-bar.unknown { transition: none; animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  #progress-bar, #progress-bar.unknown, .switch input, .switch input::after { transition: none; animation: none; }
+}

@@ -23,9 +23,6 @@ const (
 	KindUnscanned = "unscanned" // used on the volume but not found by the scan
 )
 
-// SummaryRef is the ref of the view that combines all volumes.
-const SummaryRef int64 = -2
-
 const refShift = 32
 
 // ErrBusy is returned for actions on a tree that is still being scanned.
@@ -466,9 +463,6 @@ func (a *App) Reveal(ref int64) error {
 // View returns the culled subtree under ref. minFrac is the share of the view
 // below which a segment is too small to draw.
 func (a *App) View(ref int64, maxDepth int, minFrac float64) (*View, error) {
-	if ref == SummaryRef {
-		return a.summary(maxDepth, minFrac)
-	}
 	s, id, err := a.lookup(ref)
 	if err != nil {
 		return nil, err
@@ -546,83 +540,5 @@ func offset(v *tree.ViewNode, idx int64) {
 	}
 	for _, k := range v.Kids {
 		offset(k, idx)
-	}
-}
-
-// summary combines the local volumes into one view. Network shares and optical
-// discs are left out: scanning them is slow and rarely what "everything" means.
-// Volumes that have not been scanned yet count as "not scanned". The UI starts
-// their scans.
-func (a *App) summary(maxDepth int, minFrac float64) (*View, error) {
-	vols, err := platform.Volumes()
-	if err != nil {
-		return nil, err
-	}
-	var capacity, free, used, scanned, files int64
-	denied := 0
-	scanning := false
-	type part struct {
-		s    *session
-		size int64
-	}
-	var parts []part
-	for _, vol := range vols {
-		if !Local(vol) {
-			continue
-		}
-		capacity += vol.Capacity
-		free += vol.Free
-		used += vol.Capacity - vol.Free
-		a.mu.Lock()
-		s := a.byPath[filepath.Clean(vol.Path)]
-		running := s != nil && s.running
-		a.mu.Unlock()
-		if s == nil {
-			continue
-		}
-		size, f := s.scan.Tree.Size(tree.Root)
-		scanned += size
-		files += f
-		denied += s.scan.Tree.Denied()
-		scanning = scanning || running
-		parts = append(parts, part{s, size})
-	}
-
-	root := &tree.ViewNode{Ref: SummaryRef, Name: "All local drives", Size: scanned, Files: files, Kind: tree.KindDir}
-	span := max(capacity, scanned+free)
-	minBytes := int64(minFrac * float64(span))
-	for _, p := range parts {
-		if p.size == 0 {
-			continue
-		}
-		k := p.s.scan.Tree.View(tree.Root, maxDepth-1, minBytes, false)
-		k.Name = p.s.name
-		offset(k, p.s.idx)
-		root.Kids = append(root.Kids, k)
-	}
-	sortBySize(root.Kids)
-	a.addFiles(root, maxDepth, minBytes)
-	addVolumeArcs(root, used-scanned, free)
-	return &View{
-		Root:        root,
-		Crumbs:      []tree.Crumb{{Ref: SummaryRef, Name: root.Name}},
-		Parent:      -1,
-		Sep:         string(filepath.Separator),
-		VolumeBytes: span,
-		Scanning:    scanning,
-		Denied:      denied,
-	}, nil
-}
-
-// Local reports whether a volume belongs in the combined view of all drives.
-func Local(v platform.Volume) bool {
-	return v.Kind != platform.KindNetwork && v.Kind != platform.KindOptical
-}
-
-func sortBySize(kids []*tree.ViewNode) {
-	for i := 1; i < len(kids); i++ {
-		for j := i; j > 0 && kids[j-1].Size < kids[j].Size; j-- {
-			kids[j-1], kids[j] = kids[j], kids[j-1]
-		}
 	}
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.0] - 2026-11-02
+
+### Changed
+
+- The hover text has its own bar above the chart instead of sitting on top of it.
+- The drive list shows only real drives. Turn on "Show all drives" to also list disk images, extra system volumes (such as macOS Recovery) and boot, snap and container mounts on Linux. The choice is saved.
+
+### Removed
+
+- "All local drives". With one real disk it was the same as clicking that disk, and it started scans of every drive at once.
+
+### Added
+
+- Copy path in the right-click menu, for folders and files.
+- Releases list the downloads per OS with install notes, and include `THIRD_PARTY_NOTICES.txt` with the licenses of the third-party code.
+- The app shows its real version in its file properties (Windows) and app info (macOS).
+
 ## [0.1.0-beta.4] - 2026-11-02
 
 ### Changed

@@ -220,7 +220,8 @@ func Volumes() ([]Volume, error) {
 				name = l + " (" + root[:2] + ")"
 			}
 		}
-		out = append(out, Volume{Path: root, Name: name, FS: fsName, Kind: driveKind(root), Capacity: capacity, Free: free})
+		kind := driveKind(root)
+		out = append(out, Volume{Path: root, Name: name, FS: fsName, Kind: kind, Hidden: kind == KindImage, Capacity: capacity, Free: free})
 	}
 	return out, nil
 }

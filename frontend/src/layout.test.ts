@@ -129,7 +129,7 @@ describe("text", () => {
     expect(pathOf(r[0][0], "C:\\", "\\")).toBe("C:\\a");
   });
 
-  it("uses a node's own path for a volume in the summary", () => {
+  it("uses a node's own path when it has one", () => {
     const r = layout(n("all", 1, [{ ...n("vol", 1, [n("sub", 1)]), path: "/mnt/x" }]), 300);
     expect(pathOf(r[1][0], "", "/")).toBe("/mnt/x/sub");
   });

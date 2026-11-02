@@ -1,0 +1,21 @@
+name: Feature request
+description: An idea for something new.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do
+      description: The problem you have, not only the solution you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+  - type: dropdown
+    id: os
+    attributes:
+      label: Which OS does this concern
+      multiple: true
+      options: [All, Windows, macOS, Linux]

@@ -63,14 +63,25 @@ func Volumes() ([]Volume, error) {
 	if err != nil {
 		return nil, fmt.Errorf("getfsstat: %w", err)
 	}
+	// APFS volumes in one container share its space, so the same capacity as
+	// the system volume marks another volume of the system disk (Recovery, VM).
+	var rootBlocks uint64
+	for _, st := range buf[:n] {
+		if st.Flags&unix.MNT_ROOTFS != 0 {
+			rootBlocks = st.Blocks
+		}
+	}
 	var out []Volume
 	for _, st := range buf[:n] {
 		path := unix.ByteSliceToString(byteSlice(st.Mntonname[:]))
 		fs := unix.ByteSliceToString(byteSlice(st.Fstypename[:]))
-		if fs == "devfs" || fs == "autofs" || st.Blocks == 0 ||
-			strings.HasPrefix(path, "/System/Volumes/") || strings.HasPrefix(path, "/Library/Developer/CoreSimulator/") {
+		if fs == "devfs" || fs == "autofs" || st.Blocks == 0 || strings.HasPrefix(path, "/System/Volumes/") {
 			continue
 		}
+		kind := volumeKind(path, st.Flags)
+		hidden := kind == KindImage || st.Flags&unix.MNT_DONTBROWSE != 0 ||
+			strings.HasPrefix(path, "/Library/Developer/") ||
+			(fs == "apfs" && kind != KindSystem && st.Blocks == rootBlocks)
 		name := filepath.Base(path)
 		if path == "/" {
 			name = "Macintosh HD"
@@ -80,7 +91,8 @@ func Volumes() ([]Volume, error) {
 			Path:     path,
 			Name:     name,
 			FS:       fs,
-			Kind:     volumeKind(path, st.Flags),
+			Kind:     kind,
+			Hidden:   hidden,
 			Capacity: int64(st.Blocks) * bsize,
 			Free:     int64(st.Bavail) * bsize,
 		})

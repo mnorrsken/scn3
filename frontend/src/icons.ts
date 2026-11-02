@@ -18,7 +18,6 @@ const paths: Record<string, string> = {
   "drive-network": '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.3 3.8 5.1 3.8 8.5s-1.2 6.2-3.8 8.5c-2.6-2.3-3.8-5.1-3.8-8.5S9.4 5.8 12 3.5z"/>',
   "drive-optical": '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.2"/>',
   "drive-image": '<path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/>',
-  "drive-all": '<path d="M12 3.5 21 8l-9 4.5L3 8z"/><path d="M3 12.5 12 17l9-4.5M3 16.5 12 21l9-4.5"/>',
 };
 
 export function icon(name: string): string {

@@ -77,6 +77,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Stamp the version into the app metadata
+        shell: bash
+        # Windows and the NSIS installer want plain numbers, so 1.2.3-beta.4 becomes 1.2.3.
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          node -e 'const fs=require("fs");const j=JSON.parse(fs.readFileSync("wails.json"));j.info.productVersion=process.argv[1];fs.writeFileSync("wails.json",JSON.stringify(j,null,2))' "${V%%-*}"
       - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
       - name: Build
         run: |
@@ -109,6 +115,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Stamp the version into the app metadata
+        shell: bash
+        # Windows and the NSIS installer want plain numbers, so 1.2.3-beta.4 becomes 1.2.3.
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          node -e 'const fs=require("fs");const j=JSON.parse(fs.readFileSync("wails.json"));j.info.productVersion=process.argv[1];fs.writeFileSync("wails.json",JSON.stringify(j,null,2))' "${V%%-*}"
       - name: Build universal app
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
@@ -151,6 +163,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Stamp the version into the app metadata
+        shell: bash
+        # Windows and the NSIS installer want plain numbers, so 1.2.3-beta.4 becomes 1.2.3.
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          node -e 'const fs=require("fs");const j=JSON.parse(fs.readFileSync("wails.json"));j.info.productVersion=process.argv[1];fs.writeFileSync("wails.json",JSON.stringify(j,null,2))' "${V%%-*}"
       - name: Install NSIS
         run: |
           choco install nsis -y
@@ -195,6 +213,12 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Third-party notices
+        run: scripts/third-party-notices.sh > artifacts/THIRD_PARTY_NOTICES.txt
       - name: Checksums
         working-directory: artifacts
         run: sha256sum * > checksums.txt
@@ -205,8 +229,33 @@ jobs:
             $0 ~ "^## \\[" v "\\]" { found = 1; next }
             found && /^## /          { exit }
             found                    { print }
-          ' CHANGELOG.md > notes.md
-          [ -s notes.md ] || { echo "No CHANGELOG section for $VERSION_NO_V" >&2; exit 1; }
+          ' CHANGELOG.md > changes.md
+          [ -s changes.md ] || { echo "No CHANGELOG section for $VERSION_NO_V" >&2; exit 1; }
+          # A pattern with no match prints nothing; it must not fail the step.
+          row() { for f in artifacts/$2; do if [ -e "$f" ]; then echo "| $1 | \`$(basename "$f")\` |"; fi; done; }
+          {
+            cat changes.md
+            echo
+            echo "## Downloads"
+            echo
+            echo "| For | File |"
+            echo "| --- | --- |"
+            row "Windows, installer" "*-installer.exe"
+            row "Windows, single file (needs WebView2, which Windows 11 has)" "scn3.exe"
+            row "macOS 13 or newer, Apple Silicon and Intel" "*.dmg"
+            row "Debian, Ubuntu (x86_64 / ARM64)" "*.deb"
+            row "Fedora, openSUSE (x86_64 / ARM64)" "*.rpm"
+            row "Other Linux (x86_64 / ARM64)" "*.AppImage"
+            row "Command line tool \`scan\`" "scan_*"
+            echo
+            echo "## Installing"
+            echo
+            echo "- **Linux:** \`sudo apt install ./scn3_*.deb\` or \`sudo dnf install ./scn3-*.rpm\` also installs WebKitGTK. The AppImage needs WebKitGTK 4.1 installed."
+            echo "- **macOS:** the app is not signed yet. On first start, open System Settings → Privacy & Security and click **Open Anyway**."
+            echo "- **Windows:** the files are not signed yet. If SmartScreen warns, click **More info**, then **Run anyway**."
+            echo
+            echo "Check a download with \`sha256sum -c checksums.txt --ignore-missing\`. Licenses of included third-party code are in \`THIRD_PARTY_NOTICES.txt\`."
+          } > notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -214,4 +263,4 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/}"
           flags=
           case "$VERSION" in *-*) flags=--prerelease ;; esac
-          gh release create "$VERSION" --title "Release $VERSION" --notes-file notes.md $flags artifacts/*
+          gh release create "$VERSION" --title "scn3 $VERSION" --notes-file notes.md $flags artifacts/*

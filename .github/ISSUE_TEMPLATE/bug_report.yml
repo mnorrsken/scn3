@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: scn3 version
+      placeholder: v0.9.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version and how you installed scn3
+      placeholder: "Windows 11 24H2, installer / Ubuntu 26.04, .deb / macOS 15, dmg"
+    validations:
+      required: true
+  - type: textarea
+    id: cli
+    attributes:
+      label: Output of the scan command line tool
+      description: If scanning goes wrong, run `scan <path>` on the same folder and paste the output.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, the drive type (USB, network share), antivirus, and so on.
