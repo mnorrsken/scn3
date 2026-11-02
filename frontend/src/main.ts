@@ -1,6 +1,6 @@
 import { api, copyText, dialogs, onProgress, type Progress, type View, type Volume } from "./backend";
 import {
-  FULL, findArc, formatBytes, formatDate, geometry, hitTest, layout, lerpDomain, MAX_DEPTH, minFraction, pathOf, zoomScene,
+  FULL, findArc, fitMiddle, formatBytes, formatDate, geometry, hitTest, layout, lerpDomain, MAX_DEPTH, minFraction, pathOf, zoomScene,
   heatColor, inWedge, scannedEnd, TAU, type Arc, type Colors, type Domain, type Geometry, type Mode,
 } from "./layout";
 import { icon } from "./icons";
@@ -172,6 +172,7 @@ function resize(): void {
   }
   const R = geom.R;
   geom = geometry(box.width, box.height);
+  if (lastInfo[0]) setInfo(...lastInfo); // the info bar changed width too
   dirty = true;
   schedule();
   // The cull limit depends on the radius, so a bigger chart can show more.
@@ -387,10 +388,20 @@ function updateChrome(): void {
   renderVolumes();
 }
 
+let lastInfo: [string, string] = ["", ""];
+const measureCtx = document.createElement("canvas").getContext("2d")!;
+
+/** Shows a path and its facts; a long path is shortened in the middle to fit. */
 function setInfo(where: string, facts: string): void {
-  const strong = Object.assign(document.createElement("span"), { className: "where", textContent: where });
+  lastInfo = [where, facts];
+  const info = $("info");
+  const strong = Object.assign(document.createElement("span"), { className: "where", textContent: where, title: where });
   const rest = Object.assign(document.createElement("span"), { className: "facts", textContent: facts });
-  $("info").replaceChildren(strong, rest);
+  info.replaceChildren(strong, rest);
+  const css = getComputedStyle(info);
+  const room = info.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) - rest.offsetWidth - parseFloat(css.columnGap || "0");
+  measureCtx.font = getComputedStyle(strong).font;
+  strong.textContent = fitMiddle(where, room - 2, (s) => measureCtx.measureText(s).width);
 }
 
 function showInfo(): void {

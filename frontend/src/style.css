@@ -189,7 +189,7 @@ h2 { margin: 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; t
   overflow: hidden;
   user-select: text;
 }
-#info .where { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#info .where { color: var(--text); font-weight: 600; overflow: hidden; min-width: 0; }
 #info .facts { flex: none; }
 #area { flex: 1; min-height: 0; position: relative; }
 canvas { position: absolute; inset: 0; width: 100%; height: 100%; }

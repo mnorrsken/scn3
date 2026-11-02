@@ -317,6 +317,28 @@ export function pathOf(a: Arc, rootPath: string, sep: string): string {
   return (base.endsWith(sep) ? base : base + sep) + parts.join(sep);
 }
 
+/**
+ * Shortens text to fit maxWidth by cutting out the middle, keeping about a
+ * third from the start and two thirds from the end: for a path, the drive and
+ * the file name matter most. measure returns the drawn width of a string.
+ */
+export function fitMiddle(text: string, maxWidth: number, measure: (s: string) => number): string {
+  if (measure(text) <= maxWidth) return text;
+  const cut = (n: number) => {
+    const head = Math.floor(n / 3);
+    return text.slice(0, head) + "…" + text.slice(text.length - (n - head));
+  };
+  // The most characters that still fit, found by halving.
+  let lo = 0;
+  let hi = text.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (measure(cut(mid)) <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return cut(lo);
+}
+
 /** A local date as YYYY-MM-DD, which reads the same in every country. */
 export function formatDate(unixSeconds: number): string {
   const d = new Date(unixSeconds * 1000);

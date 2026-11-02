@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.2] - 2026-11-03
+
+### Changed
+
+- A long path in the info bar is shortened in the middle, so both the drive and the file or folder name stay visible. The full path shows when you hover over it.
+
 ## [0.9.1] - 2026-11-02
 
 ### Changed

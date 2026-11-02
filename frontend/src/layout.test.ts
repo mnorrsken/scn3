@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Kind, ViewNode } from "./backend";
-import { arcColor, findArc, formatBytes, formatDate, FULL, geometry, heatColor, hitTest, inkOn, inWedge, scannedEnd, WEDGE_IN, WEDGE_OUT, layout, lerpDomain, pathOf, TAU, zoomScene } from "./layout";
+import { arcColor, findArc, fitMiddle, formatBytes, formatDate, FULL, geometry, heatColor, hitTest, inkOn, inWedge, scannedEnd, WEDGE_IN, WEDGE_OUT, layout, lerpDomain, pathOf, TAU, zoomScene } from "./layout";
 
 const n = (name: string, size: number, kids?: ViewNode[], kind: Kind = "dir", ref = 1): ViewNode => ({
   ref,
@@ -210,6 +210,16 @@ describe("text", () => {
   it("uses a node's own path when it has one", () => {
     const r = layout(n("all", 1, [{ ...n("vol", 1, [n("sub", 1)]), path: "/mnt/x" }]), 300);
     expect(pathOf(r[1][0], "", "/")).toBe("/mnt/x/sub");
+  });
+
+  it("shortens paths in the middle, keeping more of the end", () => {
+    const width = (s: string) => s.length; // one unit per character
+    const path = "/Users/martin/Library/Caches/com.example.app/images/data.bin";
+    expect(fitMiddle(path, 100, width)).toBe(path);
+    const short = fitMiddle(path, 30, width);
+    expect(short.length).toBe(30);
+    expect(short).toBe("/Users/ma….app/images/data.bin"); // a third kept from the start, the rest from the end
+    expect(fitMiddle(path, 1, width)).toBe("…");
   });
 
   it("formats dates the same way everywhere", () => {
