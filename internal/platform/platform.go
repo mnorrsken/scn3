@@ -4,11 +4,22 @@ package platform
 
 import "path/filepath"
 
+// Kinds of volumes, for the icon next to each.
+const (
+	KindSystem   = "system"   // the drive the OS runs from
+	KindInternal = "internal" // another built-in disk
+	KindExternal = "external" // USB, SD card, other removable media
+	KindNetwork  = "network"  // SMB, NFS and other network shares
+	KindOptical  = "optical"  // CD, DVD, Blu-ray
+	KindImage    = "image"    // disk image, loop or virtual disk
+)
+
 // Volume is a mounted filesystem.
 type Volume struct {
 	Path     string `json:"path"`
 	Name     string `json:"name"`
 	FS       string `json:"fs"`
+	Kind     string `json:"kind"`
 	Capacity int64  `json:"capacity"`
 	Free     int64  `json:"free"`
 }

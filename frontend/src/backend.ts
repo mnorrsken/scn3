@@ -1,6 +1,6 @@
 // Typed access to the Go API that Wails binds on window.go.
 
-export type Kind = "dir" | "files" | "other" | "free" | "unscanned";
+export type Kind = "dir" | "file" | "other" | "free" | "unscanned";
 
 export interface ViewNode {
   ref: number;
@@ -32,6 +32,7 @@ export interface Volume {
   path: string;
   name: string;
   fs: string;
+  kind: "system" | "internal" | "external" | "network" | "optical" | "image";
   capacity: number;
   free: number;
 }
@@ -60,6 +61,8 @@ interface Api {
   Trash(ref: number): Promise<void>;
   Hide(ref: number): Promise<void>;
   Reveal(ref: number): Promise<void>;
+  TrashFile(dirRef: number, name: string): Promise<void>;
+  RevealFile(dirRef: number, name: string): Promise<void>;
   View(ref: number, maxDepth: number, minFrac: number): Promise<View>;
   Settings(): Promise<Settings>;
   SetTheme(theme: string): Promise<void>;

@@ -8,28 +8,31 @@
   </head>
   <body>
     <header>
-      <div id="toolbar">
-        <button id="up" title="Up to the parent folder (Backspace)">Up</button>
-        <button id="back" title="Back (Alt+Left)">Back</button>
-        <button id="rescan" title="Rescan this folder (F5)">Rescan</button>
-        <button id="cancel" hidden>Cancel</button>
-        <nav id="crumbs" aria-label="Path"></nav>
-        <select id="theme" aria-label="Theme">
-          <option value="system">System theme</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
+      <div class="group">
+        <button id="up" class="tool" title="Up to the parent folder (Backspace)" aria-label="Up"></button>
+        <button id="back" class="tool" title="Back (Alt+Left)" aria-label="Back"></button>
+        <button id="rescan" class="tool" title="Rescan this folder (F5)" aria-label="Rescan"></button>
+        <button id="cancel" class="tool danger" title="Cancel the scan" aria-label="Cancel scan" hidden></button>
       </div>
-      <div id="info" aria-live="polite"></div>
+      <nav id="crumbs" aria-label="Path"></nav>
+      <div class="theme">
+        <button id="theme" class="tool" aria-haspopup="menu" aria-expanded="false" title="Theme"></button>
+        <div id="theme-menu" class="popover" role="menu" hidden>
+          <button role="menuitemradio" data-theme="system">System</button>
+          <button role="menuitemradio" data-theme="light">Light</button>
+          <button role="menuitemradio" data-theme="dark">Dark</button>
+          <button role="menuitemradio" data-theme="contrast">High contrast</button>
+        </div>
+      </div>
     </header>
     <main>
       <aside>
-        <h2>Volumes</h2>
+        <h2>Drives</h2>
         <ul id="volumes"></ul>
-        <label class="check"><input type="checkbox" id="summary" /> Summary</label>
-        <button id="folder">Scan a folder…</button>
+        <button id="folder" class="wide"></button>
       </aside>
       <section id="stage">
+        <div id="info" aria-live="polite"></div>
         <div id="progress" hidden>
           <div id="progress-text"></div>
           <div class="bar"><div id="progress-bar"></div></div>
@@ -39,10 +42,10 @@
           <button id="privacy" hidden>Open Full Disk Access settings</button>
         </div>
         <canvas id="chart"></canvas>
-        <p id="empty">Choose a volume or folder to scan.</p>
+        <p id="empty">Pick a drive or a folder to scan.</p>
       </section>
     </main>
-    <div id="menu" role="menu" hidden></div>
+    <div id="menu" class="popover" role="menu" hidden></div>
     <div id="toast" role="alert" hidden></div>
     <dialog id="confirm">
       <p id="confirm-text"></p>

@@ -38,6 +38,7 @@ type Scan struct {
 	Root string
 
 	boundary *platform.Boundary
+	seenMu   sync.Mutex          // the UI reads seen while a scan may write it
 	seen     map[fileKey]tree.ID // hard-linked files, and the directory that counted each
 
 	// ProgressEvery is how often Run reports progress.
@@ -118,9 +119,35 @@ func (s *Scan) Remove(id tree.ID) {
 	s.Tree.Remove(id)
 }
 
+// Counted reports whether file e, listed in directory dir, was counted there.
+// A file with other hard links or clones counts only where the scan met it first.
+func (s *Scan) Counted(dir tree.ID, e platform.Entry) bool {
+	if !e.Linked {
+		return true
+	}
+	s.seenMu.Lock()
+	defer s.seenMu.Unlock()
+	owner, ok := s.seen[fileKey{e.Dev, e.Ino}]
+	return ok && owner == dir
+}
+
+// RemoveFile takes file e out of directory dir, for example after moving it
+// to the trash. Nothing changes if the file was counted elsewhere.
+func (s *Scan) RemoveFile(dir tree.ID, e platform.Entry) {
+	if !s.Counted(dir, e) {
+		return
+	}
+	s.seenMu.Lock()
+	delete(s.seen, fileKey{e.Dev, e.Ino})
+	s.seenMu.Unlock()
+	s.Tree.RemoveFile(dir, e.Size)
+}
+
 // forget clears hard-link records owned by id or its descendants, so a rescan
 // counts those files again.
 func (s *Scan) forget(id tree.ID) {
+	s.seenMu.Lock()
+	defer s.seenMu.Unlock()
 	for k, owner := range s.seen {
 		if s.Tree.IsUnder(owner, id) {
 			delete(s.seen, k)
@@ -270,6 +297,7 @@ func (s *Scan) walk(ctx context.Context, start tree.ID, path string, onProgress 
 			err = ctx.Err()
 		case r := <-results:
 			pending--
+			s.seenMu.Lock()
 			for _, f := range r.linked {
 				if _, dup := s.seen[f.key]; dup {
 					continue
@@ -278,6 +306,7 @@ func (s *Scan) walk(ctx context.Context, start tree.ID, path string, onProgress 
 				r.bytes += f.size
 				r.files++
 			}
+			s.seenMu.Unlock()
 			first := s.Tree.Add(r.id, r.bytes, r.files, r.kids, r.err != nil)
 			for i, k := range r.kids {
 				jobs.push(job{id: first + tree.ID(i), path: filepath.Join(r.path, k.Name)})

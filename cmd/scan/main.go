@@ -77,7 +77,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	if *asJSON {
 		w := bufio.NewWriter(stdout)
-		v := s.Tree.View(tree.Root, *depth, 0)
+		v := s.Tree.View(tree.Root, *depth, 0, true)
 		v.Name = filepath.Base(s.Root)
 		if err := json.NewEncoder(w).Encode(jsonNode(v)); err != nil {
 			return fmt.Errorf("writing JSON: %w", err)
@@ -87,7 +87,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	size, files := s.Tree.Size(tree.Root)
 	fmt.Fprintf(stdout, "%s: %d bytes, %d files, %d directories, %s\n", s.Root, size, files, last.Dirs, last.Elapsed.Round(1e6))
-	kids := s.Tree.View(tree.Root, 1, 0).Kids
+	kids := s.Tree.View(tree.Root, 1, 0, true).Kids
 	sort.SliceStable(kids, func(a, b int) bool { return kids[a].Size > kids[b].Size })
 	for _, k := range kids {
 		fmt.Fprintf(stdout, "%14d  %s\n", k.Size, k.Name)

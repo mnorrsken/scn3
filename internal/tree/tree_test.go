@@ -88,7 +88,7 @@ func sum(v *ViewNode) int64 {
 
 func TestViewCullsAndKeepsSum(t *testing.T) {
 	tr, _, _, _ := sample(t)
-	v := tr.View(Root, 8, 5)
+	v := tr.View(Root, 8, 5, true)
 	if sum(v) != v.Size {
 		t.Fatalf("root kids sum %d, size %d", sum(v), v.Size)
 	}
@@ -106,7 +106,7 @@ func TestViewCullsAndKeepsSum(t *testing.T) {
 
 func TestViewDepthAndSort(t *testing.T) {
 	tr, _, _, _ := sample(t)
-	v := tr.View(Root, 1, 0)
+	v := tr.View(Root, 1, 0, true)
 	for i, k := range v.Kids {
 		if k.Kids != nil {
 			t.Fatalf("kid %q has kids beyond the depth limit", k.Name)
@@ -120,10 +120,35 @@ func TestViewDepthAndSort(t *testing.T) {
 func TestViewSkipsRemoved(t *testing.T) {
 	tr, a, _, _ := sample(t)
 	tr.Remove(a)
-	for _, k := range tr.View(Root, 8, 0).Kids {
+	for _, k := range tr.View(Root, 8, 0, true).Kids {
 		if k.Name == "a" {
 			t.Fatal("removed node in view")
 		}
+	}
+}
+
+func TestViewWithoutFilesLeavesAGap(t *testing.T) {
+	tr, _, _, _ := sample(t)
+	v := tr.View(Root, 8, 5, false)
+	for _, k := range v.Kids {
+		if k.Kind == KindFiles {
+			t.Fatal("files segment in view")
+		}
+	}
+	// a (1100) + other (b: 1); the root's own 10 bytes are left out.
+	if got := sum(v); got != 1101 {
+		t.Fatalf("kids sum %d", got)
+	}
+}
+
+func TestRemoveFile(t *testing.T) {
+	tr, a, _, _ := sample(t)
+	tr.RemoveFile(a, 60)
+	if s, f := tr.Size(Root); s != 1051 || f != 6 {
+		t.Fatalf("root = %d bytes %d files", s, f)
+	}
+	if own, f := tr.Own(a); own != 40 || f != 1 {
+		t.Fatalf("a own = %d bytes %d files", own, f)
 	}
 }
 

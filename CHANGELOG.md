@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.0-beta.4] - 2026-11-02
+
+### Changed
+
+- No more "files here" segments. Files now show one by one: always in the folder in the center (small ones merged into "other"), and further out in folders whose files take up a visible part of the chart. Elsewhere a folder's own files are an empty part of its arc. Only those folders are read again, at most 200 per view, so this does not slow the scan.
+
+- New look: icon toolbar, drive cards with an icon per drive type, and a theme menu.
+- The Summary checkbox is now an "All local drives" card. It leaves out network shares and optical discs.
+- Linux: a scan no longer enters bind mounts or other mounts below the scanned folder, even on the same device.
+
+### Added
+
+- Right-click a file: Open in file manager, or Move to Trash.
+- High-contrast theme. The System theme picks it when the OS asks for more contrast.
+
 ## [0.1.0-beta.3] - 2026-11-02
 
 ### Fixed

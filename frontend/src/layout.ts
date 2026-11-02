@@ -42,14 +42,18 @@ export const minFraction = (R: number): number => MIN_ARC_PX / (TAU * R);
 
 const pinned = (k: Kind): boolean => k === "free" || k === "unscanned";
 
-/** Lays out the kids of root into rings, each sorted by start angle. */
+/**
+ * Lays out the kids of root into rings, each sorted by start angle. Loose files
+ * below the center have no segment, so kids may add up to less than their
+ * parent: that part of the parent's angle stays empty.
+ */
 export function layout(root: ViewNode, R: number, maxDepth = MAX_DEPTH): Arc[][] {
   const rings: Arc[][] = Array.from({ length: maxDepth }, () => []);
   const minAngle = MIN_ARC_PX / R;
 
   const place = (node: ViewNode, a0: number, a1: number, ring: number, parent: Arc | null, hue: number) => {
     if (ring >= maxDepth || !node.kids?.length) return;
-    const total = node.kids.reduce((s, k) => s + k.size, 0);
+    const total = Math.max(node.size, node.kids.reduce((s, k) => s + k.size, 0));
     if (total <= 0) return;
     const span = a1 - a0;
     let at = a0;
@@ -175,15 +179,22 @@ export function zoomScene(outer: Arc[][], inner: Arc[][], at: Arc): { arcs: Arc[
 
 const HUES = [0, 120, 48, 212, 285, 28, 170, 330, 85, 245];
 
+export type Mode = "light" | "dark" | "contrast";
+
 /** Colour by top-level branch; lighter with depth. */
-export function arcColor(a: Pick<Arc, "hue" | "ring" | "kind" | "denied">, dark: boolean): string {
+export function arcColor(a: Pick<Arc, "hue" | "ring" | "kind" | "denied">, mode: Mode): string {
   if (a.kind === "other" || a.kind === "unscanned" || a.denied) {
-    return dark ? "hsl(0 0% 34%)" : "hsl(0 0% 72%)";
+    return { light: "hsl(0 0% 72%)", dark: "hsl(0 0% 34%)", contrast: "hsl(0 0% 62%)" }[mode];
   }
   const hue = HUES[a.hue % HUES.length];
-  const base = dark ? 36 : 46;
-  const light = Math.min(base + a.ring * (dark ? 5 : 6), 88);
-  return `hsl(${hue} ${a.kind === "files" ? 30 : 72}% ${light}%)`;
+  if (mode === "contrast") {
+    // Bright, fully saturated colours on black, light enough for black labels.
+    const light = Math.min(52 + a.ring * 4, 80);
+    return `hsl(${hue} ${a.kind === "file" ? 60 : 100}% ${light}%)`;
+  }
+  const dark = mode === "dark";
+  const light = Math.min((dark ? 36 : 46) + a.ring * (dark ? 5 : 6), 88);
+  return `hsl(${hue} ${a.kind === "file" ? 30 : 72}% ${light}%)`;
 }
 
 export function pathOf(a: Arc, rootPath: string, sep: string): string {

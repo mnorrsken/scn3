@@ -10,6 +10,9 @@ scn3 shows disk usage as a sunburst chart. It is a desktop app (Go and Wails v2,
 - Click to zoom, with animation.
 - Up, Back and Rescan buttons, and a breadcrumb.
 - Context menu: Zoom, Open, Rescan, Hide, Move to Trash.
+- Modern look with light, dark and high-contrast themes (System follows the OS, including its "increase contrast" setting).
+- Drives show an icon for their type: system, internal, external (USB, SD), network share, optical disc or disk image. "All local drives" combines the local ones; network shares and discs are left out of it and scanned only when clicked.
+- Large files show as their own segments, so they are easy to spot and move to the Trash. The folder in the center always shows its files; further out, a folder shows its files when they take up a visible part of the chart, otherwise they are an empty part of its arc.
 - Volume list and Summary.
 - Light and dark theme.
 - Settings file.
@@ -33,7 +36,7 @@ Settings are saved as `scn3/settings.json` in your user config directory (`os.Us
 - Size on disk is used, not file length.
 - A hard-linked file is counted once.
 - Symlinks are not followed.
-- Other mounts are not followed.
+- Other mounts are not followed. On Linux this includes bind mounts and btrfs subvolumes that sit on the same device, so nothing is counted twice.
 - On macOS, APFS clones of a file count once, in the folder the scan reaches first. A clone that was changed later still counts in full, so the total can be a little too high.
 
 ### The grey "not scanned" arc

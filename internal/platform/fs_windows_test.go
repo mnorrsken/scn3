@@ -98,3 +98,10 @@ func TestReadDirEmptyAndVolumeRoot(t *testing.T) {
 		t.Fatalf("%s: %v, %d entries", root, err, len(entries))
 	}
 }
+
+func TestSystemDriveKind(t *testing.T) {
+	root := os.Getenv("SystemDrive") + `\`
+	if got := driveKind(root); got != KindSystem {
+		t.Fatalf("%s is %s", root, got)
+	}
+}

@@ -157,6 +157,27 @@ func (t *Tree) countDenied(id ID) int {
 	return c
 }
 
+// Own returns the bytes and count of the loose files directly in id, plus
+// the size of the directory entry itself.
+func (t *Tree) Own(id ID) (bytes int64, files int64) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.nodes[id].own, int64(t.nodes[id].ownFile)
+}
+
+// RemoveFile takes one loose file of size bytes out of directory id.
+func (t *Tree) RemoveFile(id ID, bytes int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := &t.nodes[id]
+	bytes = min(bytes, n.own)
+	n.own -= bytes
+	if n.ownFile > 0 {
+		n.ownFile--
+	}
+	t.propagate(id, -bytes, -1)
+}
+
 // Size returns the total bytes and file count under id.
 func (t *Tree) Size(id ID) (bytes int64, files int64) {
 	t.mu.RLock()
@@ -251,16 +272,17 @@ type ViewNode struct {
 
 // View returns the subtree under id, at most maxDepth rings deep. Segments
 // smaller than minBytes are merged per parent into one "other" segment so that
-// the sizes still add up.
-func (t *Tree) View(id ID, maxDepth int, minBytes int64) *ViewNode {
+// the sizes still add up. With files false, the loose files of a directory get
+// no segment and are not merged into "other": they stay as unexplained size.
+func (t *Tree) View(id ID, maxDepth int, minBytes int64, files bool) *ViewNode {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	root := t.viewNode(id, maxDepth, minBytes)
+	root := t.viewNode(id, maxDepth, minBytes, files)
 	root.Path = t.pathLocked(id)
 	return root
 }
 
-func (t *Tree) viewNode(id ID, depth int, minBytes int64) *ViewNode {
+func (t *Tree) viewNode(id ID, depth int, minBytes int64, files bool) *ViewNode {
 	n := &t.nodes[id]
 	v := &ViewNode{
 		Ref:    int64(id),
@@ -291,9 +313,9 @@ func (t *Tree) viewNode(id ID, depth int, minBytes int64) *ViewNode {
 
 	kids := make([]*ViewNode, 0, len(big)+2)
 	for _, i := range big {
-		kids = append(kids, t.viewNode(i, depth-1, minBytes))
+		kids = append(kids, t.viewNode(i, depth-1, minBytes, files))
 	}
-	if n.own > 0 {
+	if n.own > 0 && files {
 		if n.own < minBytes {
 			otherSize += n.own
 			otherFiles += int64(n.ownFile)

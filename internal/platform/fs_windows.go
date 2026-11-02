@@ -3,6 +3,7 @@ package platform
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -219,9 +220,71 @@ func Volumes() ([]Volume, error) {
 				name = l + " (" + root[:2] + ")"
 			}
 		}
-		out = append(out, Volume{Path: root, Name: name, FS: fsName, Capacity: capacity, Free: free})
+		out = append(out, Volume{Path: root, Name: name, FS: fsName, Kind: driveKind(root), Capacity: capacity, Free: free})
 	}
 	return out, nil
+}
+
+// driveKind tells what kind of drive root (like `C:\`) is. Windows reports USB
+// hard disks as fixed, so for those the bus type decides.
+func driveKind(root string) string {
+	p, err := windows.UTF16PtrFromString(root)
+	if err != nil {
+		return KindInternal
+	}
+	switch windows.GetDriveType(p) {
+	case windows.DRIVE_REMOTE:
+		return KindNetwork
+	case windows.DRIVE_CDROM:
+		return KindOptical
+	case windows.DRIVE_REMOVABLE:
+		return KindExternal
+	}
+	if strings.EqualFold(root[:2], os.Getenv("SystemDrive")) {
+		return KindSystem
+	}
+	switch busType(root[:2]) {
+	case busUSB, bus1394, busSD, busMMC:
+		return KindExternal
+	case busVirtual, busFileBackedVirtual:
+		return KindImage
+	}
+	return KindInternal
+}
+
+const (
+	ioctlStorageQueryProperty = 0x2D1400
+	bus1394                   = 4
+	busUSB                    = 7
+	busSD                     = 0xC
+	busMMC                    = 0xD
+	busVirtual                = 0xE
+	busFileBackedVirtual      = 0xF
+)
+
+// busType asks the volume's device how it is attached (STORAGE_BUS_TYPE), or -1.
+func busType(drive string) int {
+	p, err := windows.UTF16PtrFromString(`\\.\` + drive)
+	if err != nil {
+		return -1
+	}
+	h, err := windows.CreateFile(p, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		return -1
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+	// STORAGE_PROPERTY_QUERY{StorageDeviceProperty, PropertyStandardQuery}.
+	query := [3]uint32{}
+	// STORAGE_DEVICE_DESCRIPTOR: BusType is the uint32 at offset 28.
+	var out [64]uint32
+	var n uint32
+	err = windows.DeviceIoControl(h, ioctlStorageQueryProperty,
+		(*byte)(unsafe.Pointer(&query[0])), uint32(unsafe.Sizeof(query)),
+		(*byte)(unsafe.Pointer(&out[0])), uint32(unsafe.Sizeof(out)), &n, nil)
+	if err != nil || n < 32 {
+		return -1
+	}
+	return int(out[7])
 }
 
 // NewBoundary allows everything: Windows mounts and links are reparse points,

@@ -1,9 +1,9 @@
 // Draws arcs on a canvas. Coordinates are CSS pixels; the caller scales for DPR.
 
-import { arcColor, FULL, TAU, type Arc, type Domain, type Geometry } from "./layout";
+import { arcColor, FULL, TAU, type Arc, type Domain, type Geometry, type Mode } from "./layout";
 
 export interface Palette {
-  dark: boolean;
+  mode: Mode;
   bg: string;
   text: string;
   quiet: string;
@@ -46,7 +46,7 @@ export function drawArcs(ctx: CanvasRenderingContext2D, arcs: Arc[], g: Geometry
       addSegment(outlines, g, q.s, q.e, q.rIn, q.rOut);
       continue;
     }
-    const color = arcColor(a, pal.dark);
+    const color = arcColor(a, pal.mode);
     let path = fills.get(color);
     if (!path) fills.set(color, (path = new Path2D()));
     addSegment(path, g, q.s, q.e, q.rIn, q.rOut);
@@ -56,7 +56,7 @@ export function drawArcs(ctx: CanvasRenderingContext2D, arcs: Arc[], g: Geometry
     ctx.fillStyle = color;
     ctx.fill(path);
   }
-  ctx.lineWidth = 1;
+  ctx.lineWidth = pal.mode === "contrast" ? 2 : 1;
   ctx.strokeStyle = pal.bg;
   ctx.stroke(seams);
   ctx.strokeStyle = pal.outline;
@@ -66,7 +66,8 @@ export function drawArcs(ctx: CanvasRenderingContext2D, arcs: Arc[], g: Geometry
 /** Puts names on segments that have room, along the tangent. */
 export function drawLabels(ctx: CanvasRenderingContext2D, rings: Arc[][], g: Geometry, pal: Palette): void {
   if (g.w < 16) return;
-  ctx.font = LABEL_FONT;
+  ctx.font = pal.mode === "contrast" ? `600 ${LABEL_FONT}` : LABEL_FONT;
+  const ink = { light: "#111", dark: "#fff", contrast: "#000" }[pal.mode];
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const ring of rings) {
@@ -84,7 +85,7 @@ export function drawLabels(ctx: CanvasRenderingContext2D, rings: Arc[][], g: Geo
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(flip ? mid + Math.PI : mid);
-      ctx.fillStyle = a.kind === "free" ? pal.quiet : pal.dark ? "#fff" : "#111";
+      ctx.fillStyle = a.kind === "free" ? pal.quiet : ink;
       ctx.fillText(text, 0, 0);
       ctx.restore();
     }
@@ -125,11 +126,12 @@ export function drawHighlight(ctx: CanvasRenderingContext2D, arc: Arc, g: Geomet
   for (let p = arc.parent; p; p = p.parent) {
     addSegment(chain, g, p.a0, p.a1, g.r0 + p.ring * g.w, g.r0 + (p.ring + 1) * g.w);
   }
+  const wide = pal.mode === "contrast" ? 2 : 0;
   ctx.strokeStyle = pal.accent;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 + wide;
   ctx.stroke(chain);
   const self = new Path2D();
   addSegment(self, g, arc.a0, arc.a1, g.r0 + arc.ring * g.w, g.r0 + (arc.ring + 1) * g.w);
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 + wide;
   ctx.stroke(self);
 }

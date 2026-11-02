@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -79,12 +80,33 @@ func Volumes() ([]Volume, error) {
 			Path:     path,
 			Name:     name,
 			FS:       fs,
+			Kind:     volumeKind(path, st.Flags),
 			Capacity: int64(st.Blocks) * bsize,
 			Free:     int64(st.Bavail) * bsize,
 		})
 	}
 	return out, nil
 }
+
+// volumeKind tells what kind of drive path is on. The mount flags settle the
+// system drive and network shares; the rest needs Disk Arbitration (kind_darwin.go).
+func volumeKind(path string, flags uint32) string {
+	switch {
+	case flags&unix.MNT_ROOTFS != 0:
+		return KindSystem
+	case flags&unix.MNT_LOCAL == 0:
+		return KindNetwork
+	}
+	if v, ok := kindCache.Load(path); ok {
+		return v.(string)
+	}
+	kind := diskKind(path)
+	kindCache.Store(path, kind)
+	return kind
+}
+
+// kindCache holds Disk Arbitration answers: Volumes runs often, a mount rarely changes.
+var kindCache sync.Map
 
 func byteSlice[T byte | int8](s []T) []byte {
 	b := make([]byte, len(s))

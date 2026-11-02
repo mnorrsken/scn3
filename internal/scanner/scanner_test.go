@@ -36,7 +36,7 @@ func run(t *testing.T, root string) *Scan {
 
 func childID(t *testing.T, s *Scan, name string) tree.ID {
 	t.Helper()
-	for _, k := range s.Tree.View(tree.Root, 1, 0).Kids {
+	for _, k := range s.Tree.View(tree.Root, 1, 0, true).Kids {
 		if k.Name == name && k.Kind == tree.KindDir {
 			return tree.ID(k.Ref)
 		}
@@ -95,7 +95,7 @@ func TestHardLinksCountOnce(t *testing.T) {
 	// Rescanning the directory that counted the file must count it again.
 	// Look the IDs up first: the directory that did not count it has size 0.
 	var ids []tree.ID
-	for _, k := range s.Tree.View(tree.Root, 1, 0).Kids {
+	for _, k := range s.Tree.View(tree.Root, 1, 0, true).Kids {
 		if k.Kind == tree.KindDir {
 			ids = append(ids, tree.ID(k.Ref))
 		}

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/mnorrsken/scn3/internal/platform"
@@ -16,6 +18,7 @@ import (
 
 // Extra segment kinds next to the ones in package tree.
 const (
+	KindFile      = "file"      // one file, shown only in the ring around the center
 	KindFree      = "free"      // free space on the volume
 	KindUnscanned = "unscanned" // used on the volume but not found by the scan
 )
@@ -55,11 +58,14 @@ type session struct {
 	name    string
 	cancel  context.CancelFunc
 	running bool
+	files   map[tree.ID][]platform.Entry // file listings of directories shown at the center
 }
 
 // App is bound to the webview. Methods are called from the UI.
 type App struct {
-	emit func(event string, data any)
+	emit    func(event string, data any)
+	trash   func(path string) error                     // platform.Trash; tests swap it out
+	readDir func(path string) ([]platform.Entry, error) // platform.ReadDir; tests count calls
 
 	mu     sync.Mutex
 	nextID int64
@@ -69,7 +75,7 @@ type App struct {
 
 // New returns an App that sends events through emit.
 func New(emit func(event string, data any)) *App {
-	return &App{emit: emit, byIdx: map[int64]*session{}, byPath: map[string]*session{}}
+	return &App{emit: emit, trash: platform.Trash, readDir: platform.ReadDir, byIdx: map[int64]*session{}, byPath: map[string]*session{}}
 }
 
 // SetEmit replaces the event sink; Wails only provides one after startup.
@@ -164,6 +170,218 @@ func (a *App) start(s *session, id tree.ID, walk func(context.Context, func(scan
 	}()
 }
 
+// filesOf lists the files directly in directory id, cached until the tree changes.
+func (a *App) filesOf(s *session, id tree.ID) []platform.Entry {
+	a.mu.Lock()
+	cached, ok := s.files[id]
+	a.mu.Unlock()
+	if ok {
+		return cached
+	}
+	// A partial listing is still worth showing; what is missing stays in "other".
+	entries, _ := a.readDir(s.scan.Tree.Path(id))
+	files := entries[:0]
+	for _, e := range entries {
+		if !e.IsDir {
+			files = append(files, e)
+		}
+	}
+	a.mu.Lock()
+	if s.files == nil {
+		s.files = map[tree.ID][]platform.Entry{}
+	}
+	if len(s.files) >= 4*maxListedDirs {
+		s.files = map[tree.ID][]platform.Entry{} // keep the cache from growing without end
+	}
+	s.files[id] = files
+	a.mu.Unlock()
+	return files
+}
+
+// treeChanged drops cached file listings.
+func (a *App) treeChanged(s *session) {
+	a.mu.Lock()
+	s.files = nil
+	a.mu.Unlock()
+}
+
+// maxListedDirs caps how many directories one view lists files for.
+const maxListedDirs = 200
+
+// addFiles gives files their own segments, around the center and in any
+// directory further out whose loose files take up enough of the chart for at
+// least one file to be drawn. A directory with less than that is never listed,
+// so the cost follows what is visible, not how big the tree is. The rest stays
+// an empty part of the directory's arc; around the center it goes into "other".
+func (a *App) addFiles(v *tree.ViewNode, maxDepth int, minBytes int64) {
+	minBytes = max(minBytes, 1)
+	type job struct {
+		s      *session
+		id     tree.ID
+		node   *tree.ViewNode
+		own    int64
+		center bool
+		files  []platform.Entry
+	}
+	var jobs []*job
+	// kidsRing is the ring that n's kids are drawn in; 0 is around the center.
+	var walk func(n *tree.ViewNode, kidsRing int)
+	walk = func(n *tree.ViewNode, kidsRing int) {
+		if kidsRing >= maxDepth {
+			return
+		}
+		if n.Kind == tree.KindDir && n.Ref >= 0 {
+			idx, id := decode(n.Ref)
+			a.mu.Lock()
+			s := a.byIdx[idx]
+			// Listing files waits for the scan: it needs the final hard-link table.
+			idle := s != nil && !s.running
+			a.mu.Unlock()
+			if idle {
+				own, _ := s.scan.Tree.Own(id)
+				if center := kidsRing == 0; center || own >= minBytes {
+					jobs = append(jobs, &job{s: s, id: id, node: n, own: own, center: center})
+				}
+			}
+		}
+		for _, k := range n.Kids {
+			if k.Kind == tree.KindDir {
+				walk(k, kidsRing+1)
+			}
+		}
+	}
+	walk(v, 0)
+	sort.SliceStable(jobs, func(i, j int) bool {
+		if jobs[i].center != jobs[j].center {
+			return jobs[i].center
+		}
+		return jobs[i].own > jobs[j].own
+	})
+	if len(jobs) > maxListedDirs {
+		jobs = jobs[:maxListedDirs]
+	}
+
+	// Directory reads are mostly waiting on the disk, so do several at once.
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for _, j := range jobs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			j.files = a.filesOf(j.s, j.id)
+		}()
+	}
+	wg.Wait()
+	for _, j := range jobs {
+		placeFiles(j.s, j.id, j.node, j.files, minBytes, j.center)
+	}
+}
+
+// placeFiles adds the files of directory id that are at least minBytes as
+// segments of v. Files counted in another directory (hard links, clones) are
+// left out. Around the center, the rest of the loose files and the size of the
+// directory entry itself go into "other".
+func placeFiles(s *session, id tree.ID, v *tree.ViewNode, files []platform.Entry, minBytes int64, center bool) {
+	own, ownFiles := s.scan.Tree.Own(id)
+	dir := s.scan.Tree.Path(id)
+	var shown []*tree.ViewNode
+	var sum int64
+	for _, e := range files {
+		if e.Size < minBytes || !s.scan.Counted(id, e) {
+			continue
+		}
+		shown = append(shown, &tree.ViewNode{
+			Ref:   v.Ref,
+			Name:  e.Name,
+			Size:  e.Size,
+			Files: 1,
+			Kind:  KindFile,
+			Path:  filepath.Join(dir, e.Name),
+		})
+		sum += e.Size
+	}
+	sort.Slice(shown, func(i, j int) bool { return shown[i].Size > shown[j].Size })
+	// Files that grew since the scan could add up to more than was counted.
+	for sum > own && len(shown) > 0 {
+		sum -= shown[len(shown)-1].Size
+		shown = shown[:len(shown)-1]
+	}
+
+	var other *tree.ViewNode
+	kids := make([]*tree.ViewNode, 0, len(v.Kids)+len(shown))
+	for _, k := range v.Kids {
+		if k.Kind == tree.KindOther {
+			other = k
+		} else {
+			kids = append(kids, k)
+		}
+	}
+	kids = append(kids, shown...)
+	sort.SliceStable(kids, func(i, j int) bool { return kids[i].Size > kids[j].Size })
+	if rest := own - sum; center && rest > 0 {
+		if other == nil {
+			other = &tree.ViewNode{Ref: -1, Name: "other", Kind: tree.KindOther}
+		}
+		other.Size += rest
+		other.Files += max(ownFiles-int64(len(shown)), 0)
+	}
+	if other != nil {
+		kids = append(kids, other)
+	}
+	v.Kids = kids
+}
+
+// fileIn checks that name is a plain file name and finds it in directory id.
+func fileIn(s *session, id tree.ID, name string) (platform.Entry, string, error) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return platform.Entry{}, "", fmt.Errorf("%q is not a file name", name)
+	}
+	dir := s.scan.Tree.Path(id)
+	path := filepath.Join(dir, name)
+	entries, err := platform.ReadDir(dir)
+	for _, e := range entries {
+		if e.Name == name && !e.IsDir {
+			return e, path, nil
+		}
+	}
+	if err != nil {
+		return platform.Entry{}, "", fmt.Errorf("reading %s: %w", dir, err)
+	}
+	return platform.Entry{}, "", fmt.Errorf("%s no longer exists", path)
+}
+
+// TrashFile moves the file name in the directory at ref to the trash.
+func (a *App) TrashFile(ref int64, name string) error {
+	s, id, err := a.idle(ref)
+	if err != nil {
+		return err
+	}
+	e, path, err := fileIn(s, id, name)
+	if err != nil {
+		return err
+	}
+	if err := a.trash(path); err != nil {
+		return err
+	}
+	s.scan.RemoveFile(id, e)
+	a.treeChanged(s)
+	return nil
+}
+
+// RevealFile selects the file name in the directory at ref in the file manager.
+func (a *App) RevealFile(ref int64, name string) error {
+	s, id, err := a.lookup(ref)
+	if err != nil {
+		return err
+	}
+	_, path, err := fileIn(s, id, name)
+	if err != nil {
+		return err
+	}
+	return platform.Reveal(path)
+}
+
 // Cancel stops the scan that contains ref.
 func (a *App) Cancel(ref int64) {
 	idx, _ := decode(ref)
@@ -180,6 +398,7 @@ func (a *App) Rescan(ref int64) error {
 	if err != nil {
 		return err
 	}
+	a.treeChanged(s)
 	a.start(s, id, func(ctx context.Context, cb func(scanner.Progress)) error {
 		return s.scan.Rescan(ctx, id, cb)
 	})
@@ -208,10 +427,11 @@ func (a *App) Trash(ref int64) error {
 	if id == tree.Root {
 		return errors.New("the root of a scan cannot be moved to the trash")
 	}
-	if err := platform.Trash(s.scan.Tree.Path(id)); err != nil {
+	if err := a.trash(s.scan.Tree.Path(id)); err != nil {
 		return err
 	}
 	s.scan.Remove(id)
+	a.treeChanged(s)
 	return nil
 }
 
@@ -226,6 +446,7 @@ func (a *App) Hide(ref int64) error {
 		return errors.New("the root of a scan cannot be hidden")
 	}
 	s.scan.Tree.Remove(id)
+	a.treeChanged(s)
 	return nil
 }
 
@@ -276,11 +497,13 @@ func (a *App) View(ref int64, maxDepth int, minFrac float64) (*View, error) {
 	if atVolume {
 		span = max(capacity, size+free)
 	}
-	v := t.View(id, maxDepth, int64(minFrac*float64(span)))
+	minBytes := int64(minFrac * float64(span))
+	v := t.View(id, maxDepth, minBytes, false)
 	if id == tree.Root {
 		v.Name = s.name
 	}
 	offset(v, s.idx)
+	a.addFiles(v, maxDepth, minBytes)
 	if atVolume {
 		addVolumeArcs(v, capacity-free-size, free)
 	}
@@ -326,8 +549,10 @@ func offset(v *tree.ViewNode, idx int64) {
 	}
 }
 
-// summary combines every volume into one view. Volumes that have not been
-// scanned yet count as "not scanned". The UI starts their scans.
+// summary combines the local volumes into one view. Network shares and optical
+// discs are left out: scanning them is slow and rarely what "everything" means.
+// Volumes that have not been scanned yet count as "not scanned". The UI starts
+// their scans.
 func (a *App) summary(maxDepth int, minFrac float64) (*View, error) {
 	vols, err := platform.Volumes()
 	if err != nil {
@@ -342,6 +567,9 @@ func (a *App) summary(maxDepth int, minFrac float64) (*View, error) {
 	}
 	var parts []part
 	for _, vol := range vols {
+		if !Local(vol) {
+			continue
+		}
 		capacity += vol.Capacity
 		free += vol.Free
 		used += vol.Capacity - vol.Free
@@ -360,19 +588,20 @@ func (a *App) summary(maxDepth int, minFrac float64) (*View, error) {
 		parts = append(parts, part{s, size})
 	}
 
-	root := &tree.ViewNode{Ref: SummaryRef, Name: "All volumes", Size: scanned, Files: files, Kind: tree.KindDir}
+	root := &tree.ViewNode{Ref: SummaryRef, Name: "All local drives", Size: scanned, Files: files, Kind: tree.KindDir}
 	span := max(capacity, scanned+free)
 	minBytes := int64(minFrac * float64(span))
 	for _, p := range parts {
 		if p.size == 0 {
 			continue
 		}
-		k := p.s.scan.Tree.View(tree.Root, maxDepth-1, minBytes)
+		k := p.s.scan.Tree.View(tree.Root, maxDepth-1, minBytes, false)
 		k.Name = p.s.name
 		offset(k, p.s.idx)
 		root.Kids = append(root.Kids, k)
 	}
 	sortBySize(root.Kids)
+	a.addFiles(root, maxDepth, minBytes)
 	addVolumeArcs(root, used-scanned, free)
 	return &View{
 		Root:        root,
@@ -383,6 +612,11 @@ func (a *App) summary(maxDepth int, minFrac float64) (*View, error) {
 		Scanning:    scanning,
 		Denied:      denied,
 	}, nil
+}
+
+// Local reports whether a volume belongs in the combined view of all drives.
+func Local(v platform.Volume) bool {
+	return v.Kind != platform.KindNetwork && v.Kind != platform.KindOptical
 }
 
 func sortBySize(kids []*tree.ViewNode) {

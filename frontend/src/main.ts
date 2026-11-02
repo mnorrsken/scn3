@@ -1,8 +1,9 @@
 import { api, dialogs, onProgress, SummaryRef, type Progress, type View, type Volume } from "./backend";
 import {
   FULL, findArc, formatBytes, geometry, hitTest, layout, lerpDomain, MAX_DEPTH, minFraction, pathOf, zoomScene,
-  type Arc, type Domain, type Geometry,
+  type Arc, type Domain, type Geometry, type Mode,
 } from "./layout";
+import { icon } from "./icons";
 import { Nav } from "./nav";
 import { drawArcs, drawCenter, drawHighlight, drawLabels, type Palette } from "./render";
 
@@ -49,7 +50,7 @@ function palette(): Palette {
   const css = getComputedStyle(document.documentElement);
   const v = (name: string) => css.getPropertyValue(name).trim();
   return {
-    dark: document.documentElement.dataset.theme === "dark",
+    mode: document.documentElement.dataset.theme as Mode,
     bg: v("--bg"),
     text: v("--text"),
     quiet: v("--quiet"),
@@ -59,15 +60,29 @@ function palette(): Palette {
 }
 let pal: Palette;
 
+const THEMES = ["system", "light", "dark", "contrast"];
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+const systemContrast = window.matchMedia("(prefers-contrast: more)");
+
 function applyTheme(): void {
-  const dark = themeChoice === "dark" || (themeChoice === "system" && systemDark.matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  if (!THEMES.includes(themeChoice)) themeChoice = "system";
+  let mode: Mode;
+  if (themeChoice !== "system") mode = themeChoice as Mode;
+  else if (systemContrast.matches) mode = "contrast";
+  else mode = systemDark.matches ? "dark" : "light";
+  document.documentElement.dataset.theme = mode;
+  const btn = $("theme");
+  btn.innerHTML = icon(themeChoice);
+  btn.title = `Theme: ${themeChoice === "contrast" ? "high contrast" : themeChoice}`;
+  for (const item of $("theme-menu").querySelectorAll<HTMLButtonElement>("button")) {
+    item.setAttribute("aria-checked", String(item.dataset.theme === themeChoice));
+  }
   pal = palette();
   dirty = true;
   schedule();
 }
 systemDark.addEventListener("change", applyTheme);
+systemContrast.addEventListener("change", applyTheme);
 
 // ---- drawing ----
 
@@ -232,7 +247,6 @@ function back(): void {
 
 async function scan(path: string): Promise<void> {
   summaryMode = false;
-  $<HTMLInputElement>("summary").checked = false;
   try {
     const ref = await api().Scan(path);
     scans.set(path, ref);
@@ -260,9 +274,12 @@ async function rescan(ref: number): Promise<void> {
   }
 }
 
+/** The drives that "All local drives" combines: no network shares or discs. */
+const localVolumes = (): Volume[] => volumes.filter((v) => v.kind !== "network" && v.kind !== "optical");
+
 async function startSummaryScans(all: boolean): Promise<void> {
   if (all) active.clear();
-  for (const v of volumes) {
+  for (const v of localVolumes()) {
     if (all || !scans.has(v.path)) {
       scans.set(v.path, await api().Scan(v.path));
     }
@@ -271,6 +288,7 @@ async function startSummaryScans(all: boolean): Promise<void> {
 
 async function enterSummary(): Promise<void> {
   summaryMode = true;
+  renderVolumes();
   try {
     await startSummaryScans(false);
     nav.reset(SummaryRef);
@@ -294,7 +312,8 @@ async function trash(arc: Arc): Promise<void> {
   const path = arcPath(arc);
   if (!(await confirmTrash(path, formatBytes(arc.size)))) return;
   try {
-    await api().Trash(arc.ref);
+    if (arc.kind === "file") await api().TrashFile(arc.ref, arc.name);
+    else await api().Trash(arc.ref);
     await refresh();
     void loadVolumes();
   } catch (err) {
@@ -366,44 +385,63 @@ function showInfo(): void {
   const count = (n: number) => `${n.toLocaleString()} ${n === 1 ? "file" : "files"}`;
   const parentSize = a.parent?.size ?? v.root.size;
   const pct = (part: number, whole: number) => (whole > 0 ? `${((100 * part) / whole).toFixed(1)}%` : "–");
-  const where = a.kind === "other" ? `Small items in ${arcPath(a)}` : a.kind === "files" ? `Files directly in ${arcPath(a)}` : arcPath(a);
+  const where = a.kind === "other" ? `Small items in ${arcPath(a.parent ?? a)}` : arcPath(a);
   info.textContent = `${where}  ·  ${formatBytes(a.size)}  ·  ${count(a.files)}  ·  ${pct(a.size, parentSize)} of parent  ·  ${pct(a.size, v.volumeBytes)} of volume`;
+}
+
+/** Status line of a drive card: scan progress while scanning, free space otherwise. */
+function driveStatus(ref: number | undefined, free: number, capacity: number): [string, boolean] {
+  const p = ref === undefined ? undefined : active.get(ref);
+  if (p && !p.done) return [`Scanning… ${p.files.toLocaleString()} files`, true];
+  return [`${formatBytes(free)} free of ${formatBytes(capacity)}`, false];
+}
+
+function driveCard(iconName: string, name: string, status: [string, boolean], used: number, capacity: number, isActive: boolean, onClick: () => void): HTMLLIElement {
+  const li = document.createElement("li");
+  const b = document.createElement("button");
+  b.className = `drive${iconName === "drive-all" ? " all" : ""}${isActive ? " active" : ""}${status[1] ? " scanning" : ""}`;
+  b.innerHTML = icon(iconName);
+  const label = Object.assign(document.createElement("span"), { className: "name", textContent: name });
+  const small = Object.assign(document.createElement("small"), { textContent: status[0] });
+  const meter = Object.assign(document.createElement("div"), { className: "meter" });
+  const fill = document.createElement("div");
+  fill.style.width = `${capacity > 0 ? (100 * used) / capacity : 0}%`;
+  meter.append(fill);
+  b.append(label, small, meter);
+  b.onclick = onClick;
+  li.append(b);
+  return li;
 }
 
 function renderVolumes(): void {
   const list = $("volumes");
   list.replaceChildren();
+  const local = localVolumes();
+  if (local.length > 1) {
+    const capacity = local.reduce((n, v) => n + v.capacity, 0);
+    const free = local.reduce((n, v) => n + v.free, 0);
+    const scanningAll = summaryMode && local.some((v) => driveStatus(scans.get(v.path), 0, 0)[1]);
+    const status: [string, boolean] = scanningAll ? ["Scanning…", true] : [`${formatBytes(free)} free of ${formatBytes(capacity)}`, false];
+    list.append(driveCard("drive-all", "All local drives", status, capacity - free, capacity, summaryMode, () => {
+      if (!summaryMode) void enterSummary();
+    }));
+  }
   for (const vol of volumes) {
-    const li = document.createElement("li");
-    const b = document.createElement("button");
     const ref = scans.get(vol.path);
-    b.className = !summaryMode && ref !== undefined && view?.crumbs[0]?.ref === ref ? "active" : "";
-    const used = vol.capacity - vol.free;
-    const name = document.createElement("span");
-    name.textContent = vol.name;
-    const small = document.createElement("small");
-    small.textContent = `${formatBytes(vol.free)} free of ${formatBytes(vol.capacity)}`;
-    const meter = document.createElement("div");
-    meter.className = "meter";
-    const fill = document.createElement("div");
-    fill.style.width = `${(100 * used) / vol.capacity}%`;
-    meter.append(fill);
-    b.append(name, small, meter);
-    b.onclick = () => {
-      if (ref !== undefined && !summaryMode) {
-        nav.go(ref);
-        void refresh();
-      } else if (ref !== undefined) {
-        summaryMode = false;
-        $<HTMLInputElement>("summary").checked = false;
-        nav.reset(ref);
-        void refresh();
-      } else {
+    const isActive = !summaryMode && ref !== undefined && view?.crumbs[0]?.ref === ref;
+    list.append(driveCard(`drive-${vol.kind}`, vol.name, driveStatus(ref, vol.free, vol.capacity), vol.capacity - vol.free, vol.capacity, isActive, () => {
+      if (ref === undefined) {
         void scan(vol.path);
+        return;
       }
-    };
-    li.append(b);
-    list.append(li);
+      if (summaryMode) {
+        summaryMode = false;
+        nav.reset(ref);
+      } else {
+        nav.go(ref);
+      }
+      void refresh();
+    }));
   }
 }
 
@@ -425,7 +463,7 @@ function handleProgress(p: Progress): void {
   const finished = shown.every((x) => x.done);
   $("progress-text").textContent = `${finished ? "Finished" : "Scanning…"} ${files.toLocaleString()} files, ${formatBytes(bytes)}`;
   const bar = $("progress-bar");
-  const target = summaryMode ? volumes : volumes.filter((v) => scans.get(v.path) === p.scan);
+  const target = summaryMode ? localVolumes() : volumes.filter((v) => scans.get(v.path) === p.scan);
   const used = target.reduce((n, v) => n + v.capacity - v.free, 0);
   if (used > 0) {
     bar.classList.remove("unknown");
@@ -434,6 +472,7 @@ function handleProgress(p: Progress): void {
     bar.style.width = "";
     bar.classList.add("unknown");
   }
+  renderVolumes();
   if (p.done) {
     void loadVolumes();
     refetchSoon(0);
@@ -486,15 +525,20 @@ canvas.addEventListener("contextmenu", (e) => {
   if (!hit || hit.center) return;
   const arc = hit.arc;
   if (arc.ref < 0) return;
-  const isDir = arc.kind === "dir";
   const busy = !!view?.scanning;
-  const items: [string, () => void, boolean, string?][] = [
-    ["Zoom", () => void navigate(arc.ref), isDir],
-    ["Open in file manager", () => void api().Reveal(arc.ref).catch(report), true],
-    ["Rescan", () => void rescan(arc.ref), !busy],
-    ["Hide", () => void hide(arc), isDir && !busy],
-    ["Move to Trash…", () => void trash(arc), isDir && !busy, "danger"],
-  ];
+  const items: [string, () => void, boolean, string?][] =
+    arc.kind === "file"
+      ? [
+          ["Open in file manager", () => void api().RevealFile(arc.ref, arc.name).catch(report), true],
+          ["Move to Trash…", () => void trash(arc), !busy, "danger"],
+        ]
+      : [
+          ["Zoom", () => void navigate(arc.ref), true],
+          ["Open in file manager", () => void api().Reveal(arc.ref).catch(report), true],
+          ["Rescan", () => void rescan(arc.ref), !busy],
+          ["Hide", () => void hide(arc), !busy],
+          ["Move to Trash…", () => void trash(arc), !busy, "danger"],
+        ];
   const menu = $("menu");
   menu.replaceChildren(
     ...items.map(([label, action, enabled, cls]) => {
@@ -522,7 +566,10 @@ document.addEventListener("mousedown", (e) => {
 
 window.addEventListener("keydown", (e) => {
   if ($<HTMLDialogElement>("confirm").open) return;
-  if (e.key === "Escape") closeMenu();
+  if (e.key === "Escape") {
+    closeMenu();
+    setThemeMenu(false);
+  }
   else if (e.key === "Backspace") {
     e.preventDefault();
     up();
@@ -559,22 +606,26 @@ $("folder").onclick = async () => {
   }
 };
 $("privacy").onclick = () => void dialogs().OpenPrivacySettings();
-$<HTMLInputElement>("summary").onchange = (e) => {
-  if ((e.target as HTMLInputElement).checked) void enterSummary();
-  else {
-    summaryMode = false;
-    const first = volumes.map((v) => scans.get(v.path)).find((r) => r !== undefined);
-    if (first !== undefined) {
-      nav.reset(first);
-      void refresh();
-    }
-  }
-};
-$<HTMLSelectElement>("theme").onchange = (e) => {
-  themeChoice = (e.target as HTMLSelectElement).value;
-  applyTheme();
-  void api().SetTheme(themeChoice).catch(report);
-};
+const themeMenu = $<HTMLDivElement>("theme-menu");
+function setThemeMenu(open: boolean): void {
+  themeMenu.hidden = !open;
+  $("theme").setAttribute("aria-expanded", String(open));
+}
+$("theme").onclick = () => setThemeMenu(themeMenu.hidden !== false);
+for (const item of themeMenu.querySelectorAll<HTMLButtonElement>("button")) {
+  item.innerHTML = icon(item.dataset.theme!) + item.innerHTML;
+  item.onclick = () => {
+    themeChoice = item.dataset.theme!;
+    setThemeMenu(false);
+    applyTheme();
+    void api().SetTheme(themeChoice).catch(report);
+  };
+}
+document.addEventListener("mousedown", (e) => {
+  if (!themeMenu.contains(e.target as Node) && !$("theme").contains(e.target as Node)) setThemeMenu(false);
+});
+for (const [id, name] of [["up", "up"], ["back", "back"], ["rescan", "rescan"], ["cancel", "cancel"]]) $(id).innerHTML = icon(name);
+$("folder").innerHTML = `${icon("folder")}<span>Scan a folder…</span>`;
 
 // ---- start ----
 
@@ -587,7 +638,6 @@ async function start(): Promise<void> {
     const [settings, os] = await Promise.all([api().Settings(), api().Platform()]);
     platform = os;
     themeChoice = settings.theme;
-    $<HTMLSelectElement>("theme").value = themeChoice;
     applyTheme();
   } catch (err) {
     report(err);

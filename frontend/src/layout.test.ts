@@ -12,7 +12,7 @@ const n = (name: string, size: number, kids?: ViewNode[], kind: Kind = "dir", re
 });
 
 const tree = n("root", 100, [
-  n("a", 60, [n("a1", 40, undefined, "dir", 11), n("files here", 20, undefined, "files", 2)], "dir", 2),
+  n("a", 60, [n("a1", 40, undefined, "dir", 11), n("f.bin", 20, undefined, "file", 2)], "dir", 2),
   n("b", 40, undefined, "dir", 3),
 ]);
 
@@ -50,6 +50,13 @@ describe("layout", () => {
     expect(r[7].length).toBe(1);
   });
 
+  it("leaves room for loose files that have no segment", () => {
+    const r = layout(n("r", 100, [n("a", 100, [n("a1", 40)])]), 300);
+    expect(r[1][0].a0).toBe(0);
+    expect(r[1][0].a1).toBeCloseTo(TAU * 0.4);
+    expect(r[0][0].a1).toBeCloseTo(TAU);
+  });
+
   it("handles an empty folder", () => {
     expect(layout(n("r", 0, []), 300).flat()).toEqual([]);
   });
@@ -59,7 +66,14 @@ describe("layout", () => {
     expect(r[1][0].hue).toBe(r[0][0].hue);
     expect(r[0][1].hue).not.toBe(r[0][0].hue);
     const light = (s: string) => Number(/(\d+)%\)$/.exec(s)![1]);
-    expect(light(arcColor(r[1][0], false))).toBeGreaterThan(light(arcColor(r[0][0], false)));
+    expect(light(arcColor(r[1][0], "light"))).toBeGreaterThan(light(arcColor(r[0][0], "light")));
+  });
+
+  it("uses saturated, light colours in high contrast", () => {
+    const r = layout(tree, 300);
+    const c = arcColor(r[0][0], "contrast");
+    expect(c).toMatch(/ 100% /);
+    expect(Number(/(\d+)%\)$/.exec(c)![1])).toBeGreaterThanOrEqual(50);
   });
 });
 

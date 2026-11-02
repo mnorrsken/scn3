@@ -26,7 +26,7 @@ var pseudoFS = map[string]bool{
 }
 
 type mount struct {
-	id, path, fs string
+	id, path, fs string // id is the device as major:minor
 }
 
 // parseMountInfo reads /proc/self/mountinfo. Only the first mount of each
@@ -55,6 +55,55 @@ func parseMountInfo(r io.Reader) ([]mount, error) {
 		out = append(out, m)
 	}
 	return out, sc.Err()
+}
+
+// mountPoints returns the paths of all mounts in mountinfo, pseudo ones included.
+func mountPoints(r io.Reader) ([]string, error) {
+	var out []string
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		if f := strings.Fields(sc.Text()); len(f) >= 5 {
+			out = append(out, unescapeMount(f[4]))
+		}
+	}
+	return out, sc.Err()
+}
+
+var networkFS = map[string]bool{
+	"9p": true, "afs": true, "ceph": true, "cifs": true, "davfs": true, "fuse.glusterfs": true,
+	"fuse.rclone": true, "fuse.s3fs": true, "fuse.sshfs": true, "glusterfs": true, "ncpfs": true,
+	"nfs": true, "nfs4": true, "smb3": true, "smbfs": true, "sshfs": true,
+}
+
+// volumeKind tells what kind of drive m is on. sysfs is normally "/sys".
+func volumeKind(m mount, sysfs string) string {
+	switch {
+	case m.path == "/":
+		return KindSystem
+	case networkFS[m.fs]:
+		return KindNetwork
+	}
+	// /sys/dev/block/MAJ:MIN links to the device, for example
+	// .../usb2/2-1/.../block/sdb/sdb1. A partition's disk is its parent.
+	dev, err := filepath.EvalSymlinks(filepath.Join(sysfs, "dev", "block", m.id))
+	if err != nil {
+		return KindInternal
+	}
+	disk := dev
+	if _, err := os.Stat(filepath.Join(dev, "partition")); err == nil {
+		disk = filepath.Dir(dev)
+	}
+	name := filepath.Base(disk)
+	removable, _ := os.ReadFile(filepath.Join(disk, "removable"))
+	switch {
+	case strings.HasPrefix(name, "sr"):
+		return KindOptical
+	case strings.HasPrefix(name, "loop"):
+		return KindImage
+	case strings.Contains(dev, "/usb") || strings.TrimSpace(string(removable)) == "1":
+		return KindExternal
+	}
+	return KindInternal
 }
 
 // unescapeMount decodes the \040-style octal escapes of mountinfo.
@@ -93,17 +142,45 @@ func Volumes() ([]Volume, error) {
 		if err != nil || capacity == 0 {
 			continue
 		}
-		out = append(out, Volume{Path: m.path, Name: m.path, FS: m.fs, Capacity: capacity, Free: free})
+		out = append(out, Volume{Path: m.path, Name: m.path, FS: m.fs, Kind: volumeKind(m, "/sys"), Capacity: capacity, Free: free})
 	}
 	return out, nil
 }
 
-// NewBoundary keeps a scan on the device of root and out of /proc.
-func NewBoundary(root Entry, _ string) *Boundary {
-	return &Boundary{
+// NewBoundary keeps a scan on the device of root and out of every mount below
+// it. The device check alone would follow bind mounts and btrfs subvolumes
+// that share a device, and count their data twice.
+func NewBoundary(root Entry, rootPath string) *Boundary {
+	b := &Boundary{
 		devs: map[uint64]struct{}{root.Dev: {}},
 		skip: map[string]struct{}{"/proc": {}},
 	}
+	f, err := os.Open("/proc/self/mountinfo")
+	if err != nil {
+		return b
+	}
+	defer f.Close()
+	points, _ := mountPoints(f)
+	for _, p := range skipMounts(points, rootPath) {
+		b.skip[p] = struct{}{}
+	}
+	return b
+}
+
+// skipMounts returns the mount points strictly below root.
+func skipMounts(points []string, root string) []string {
+	root = filepath.Clean(root)
+	prefix := root + "/"
+	if root == "/" {
+		prefix = "/"
+	}
+	var out []string
+	for _, p := range points {
+		if p = filepath.Clean(p); p != root && strings.HasPrefix(p, prefix) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Trash moves path to the freedesktop.org trash of its filesystem. It never
