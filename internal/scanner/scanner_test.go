@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/mnorrsken/scn3/internal/tree"
@@ -163,6 +164,9 @@ func TestDeniedDirIsReported(t *testing.T) {
 	s := run(t, root)
 	if s.Tree.Denied() != 1 {
 		t.Fatalf("denied = %d", s.Tree.Denied())
+	}
+	if errs := s.ReadErrors(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "locked") {
+		t.Fatalf("read errors = %v", errs)
 	}
 }
 

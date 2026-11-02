@@ -70,6 +70,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	if last.Errors > 0 {
 		fmt.Fprintf(stderr, "scan: %d directories could not be read fully\n", last.Errors)
+		for _, err := range s.ReadErrors() {
+			fmt.Fprintln(stderr, "scan:", err)
+		}
 	}
 
 	if *asJSON {

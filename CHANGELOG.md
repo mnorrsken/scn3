@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-beta.3] - 2026-11-02
+
+### Fixed
+
+- Windows: scans found nothing on some PCs ("Invalid access to memory location"). The buffer for reading folders was not 8-byte aligned.
+- Windows: drives without file IDs (such as FAT32 and exFAT) are listed without them, so files there are not wrongly treated as hard links of each other.
+- The `scan` CLI prints the first errors it hits, not only how many folders could not be read.
+
 ## [0.1.0-beta.2] - 2026-11-02
 
 ### Fixed

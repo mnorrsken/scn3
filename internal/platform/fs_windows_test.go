@@ -59,3 +59,42 @@ func TestTrashRemovesFolder(t *testing.T) {
 		t.Fatalf("still there: %v", err)
 	}
 }
+
+func TestReadDirWithoutFileIDs(t *testing.T) {
+	allowFileIDs = false
+	t.Cleanup(func() { allowFileIDs = true })
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "f"), make([]byte, 100_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %+v", entries)
+	}
+	for _, e := range entries {
+		if e.Name == "f" && (e.IsDir || e.Linked || e.Size < 100_000) {
+			t.Fatalf("file = %+v", e)
+		}
+		if e.Name == "d" && !e.IsDir {
+			t.Fatalf("dir = %+v", e)
+		}
+	}
+}
+
+func TestReadDirEmptyAndVolumeRoot(t *testing.T) {
+	entries, err := ReadDir(t.TempDir())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("empty dir: %v %+v", err, entries)
+	}
+	root := os.Getenv("SystemDrive") + `\`
+	entries, err = ReadDir(root)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("%s: %v, %d entries", root, err, len(entries))
+	}
+}

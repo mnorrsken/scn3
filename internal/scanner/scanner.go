@@ -44,7 +44,14 @@ type Scan struct {
 	ProgressEvery time.Duration
 	// Workers is the number of parallel directory readers.
 	Workers int
+
+	readErrs []error // the first few read errors, for reporting
 }
+
+const maxReadErrs = 10
+
+// ReadErrors returns the first few errors from reading directories.
+func (s *Scan) ReadErrors() []error { return s.readErrs }
 
 // New prepares a scan of root, which must be a directory.
 func New(root string) (*Scan, error) {
@@ -282,6 +289,9 @@ func (s *Scan) walk(ctx context.Context, start tree.ID, path string, onProgress 
 			bytes.Add(r.bytes)
 			if r.err != nil {
 				errs.Add(1)
+				if len(s.readErrs) < maxReadErrs {
+					s.readErrs = append(s.readErrs, fmt.Errorf("reading %s: %w", r.path, r.err))
+				}
 			}
 		}
 	}

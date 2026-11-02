@@ -51,51 +51,101 @@ func openDir(path string) (windows.Handle, error) {
 		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 }
 
-// ReadDir lists path through FileIdBothDirectoryInfo. One call returns a whole
-// batch with allocation size (right for compressed and sparse files) and file
-// ID, so no file has to be opened one by one. Reparse points (junctions,
-// symlinks, OneDrive placeholders) are never entered.
+// fileFullDirInfo mirrors FILE_FULL_DIR_INFO: the same as above without file IDs.
+type fileFullDirInfo struct {
+	NextEntryOffset uint32
+	FileIndex       uint32
+	CreationTime    int64
+	LastAccessTime  int64
+	LastWriteTime   int64
+	ChangeTime      int64
+	EndOfFile       int64
+	AllocationSize  int64
+	FileAttributes  uint32
+	FileNameLength  uint32
+	EaSize          uint32
+	FileName        [1]uint16
+}
+
+// allowFileIDs lets tests force the listing without file IDs.
+var allowFileIDs = true
+
+// ReadDir lists path with GetFileInformationByHandleEx. One call returns a
+// whole batch with allocation size (right for compressed and sparse files),
+// so no file has to be opened one by one. Reparse points (junctions, symlinks,
+// OneDrive placeholders) are never entered.
+//
+// It follows what Go's os.ReadDir does: ask for file IDs only when the volume
+// says it supports them, start with the "restart" class, and treat
+// ERROR_FILE_NOT_FOUND on the first call as an empty directory. If the call
+// with file IDs fails anyway, it lists again without them. Then hard links
+// cannot be recognised and count once per link.
 func ReadDir(path string) ([]Entry, error) {
 	h, err := openDir(path)
 	if err != nil {
-		return nil, &windowsPathError{path, err}
+		return nil, err
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
 
-	var vol windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(h, &vol); err != nil {
-		return nil, &windowsPathError{path, err}
+	var serial, flags uint32
+	if err := windows.GetVolumeInformationByHandle(h, nil, 0, &serial, nil, &flags, nil, 0); err != nil {
+		flags = 0
 	}
+	withIDs := allowFileIDs &&
+		flags&windows.FILE_SUPPORTS_OBJECT_IDS != 0 && flags&windows.FILE_SUPPORTS_OPEN_BY_FILE_ID != 0
 
 	var out []Entry
-	buf := make([]byte, 64*1024)
+	// The records hold 64-bit fields, and Windows fails with ERROR_NOACCESS (998)
+	// if the buffer is not 8-byte aligned. A []byte only guarantees 1 byte, and
+	// this one stays on the goroutine stack, so build it from uint64s.
+	words := make([]uint64, 8*1024)
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), len(words)*8)
+	first := true
 	for {
-		err := windows.GetFileInformationByHandleEx(h, windows.FileIdBothDirectoryInfo, &buf[0], uint32(len(buf)))
-		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+		class := uint32(windows.FileFullDirectoryInfo)
+		switch {
+		case withIDs && first:
+			class = windows.FileIdBothDirectoryRestartInfo
+		case withIDs:
+			class = windows.FileIdBothDirectoryInfo
+		case first:
+			class = windows.FileFullDirectoryRestartInfo
+		}
+		err := windows.GetFileInformationByHandleEx(h, class, &buf[0], uint32(len(buf)))
+		switch {
+		case errors.Is(err, windows.ERROR_NO_MORE_FILES):
 			return out, nil
+		case first && errors.Is(err, windows.ERROR_FILE_NOT_FOUND):
+			return out, nil
+		case first && withIDs && err != nil:
+			withIDs = false
+			continue
+		case err != nil:
+			return out, fmt.Errorf("listing (class %d): %w", class, err)
 		}
-		if err != nil {
-			return out, &windowsPathError{path, err}
-		}
+		first = false
 		for off := uintptr(0); ; {
-			info := (*fileIDBothDirInfo)(unsafe.Pointer(&buf[off]))
-			name := windows.UTF16ToString(unsafe.Slice(&info.FileName[0], info.FileNameLength/2))
-			if name != "." && name != ".." {
-				attrs := info.FileAttributes
-				isDir := attrs&windows.FILE_ATTRIBUTE_DIRECTORY != 0 && attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
-				out = append(out, Entry{
-					Name:   name,
-					IsDir:  isDir,
-					Size:   info.AllocationSize,
-					Dev:    uint64(vol.VolumeSerialNumber),
-					Ino:    uint64(info.FileID),
-					Linked: attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0,
-				})
+			var e Entry
+			var attrs, next uint32
+			if withIDs {
+				info := (*fileIDBothDirInfo)(unsafe.Pointer(&buf[off]))
+				e.Name = windows.UTF16ToString(unsafe.Slice(&info.FileName[0], info.FileNameLength/2))
+				e.Size, e.Ino, attrs, next = info.AllocationSize, uint64(info.FileID), info.FileAttributes, info.NextEntryOffset
+			} else {
+				info := (*fileFullDirInfo)(unsafe.Pointer(&buf[off]))
+				e.Name = windows.UTF16ToString(unsafe.Slice(&info.FileName[0], info.FileNameLength/2))
+				e.Size, attrs, next = info.AllocationSize, info.FileAttributes, info.NextEntryOffset
 			}
-			if info.NextEntryOffset == 0 {
+			if e.Name != "." && e.Name != ".." {
+				e.IsDir = attrs&windows.FILE_ATTRIBUTE_DIRECTORY != 0 && attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
+				e.Dev = uint64(serial)
+				e.Linked = withIDs && attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0
+				out = append(out, e)
+			}
+			if next == 0 {
 				break
 			}
-			off += uintptr(info.NextEntryOffset)
+			off += uintptr(next)
 		}
 	}
 }
