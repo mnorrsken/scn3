@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.3] - 2026-11-03
+
+### Fixed
+
+- Windows: OneDrive folders (Files On-Demand) and other cloud or virtual folders are scanned now. Before, every reparse point was skipped, so files kept on the device in OneDrive did not count. Junctions, symbolic links and mounted drives are still not followed, and cloud folders that exist only online are skipped.
+
 ## [0.9.2] - 2026-11-03
 
 ### Changed

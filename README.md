@@ -51,7 +51,7 @@ Settings are saved as `scn3/settings.json` in your user config directory (`os.Us
 
 - Size on disk is used, not file length.
 - A hard-linked file is counted once.
-- Symlinks are not followed.
+- Symlinks, junctions and mounted drives are not followed. On Windows, OneDrive and other cloud folders are scanned; files that are only online take no space and count as 0.
 - Other mounts are not followed. On Linux this includes bind mounts and btrfs subvolumes that sit on the same device, so nothing is counted twice.
 - On macOS, APFS clones of a file count once, in the folder the scan reaches first. A clone that was changed later still counts in full, so the total can be a little too high.
 

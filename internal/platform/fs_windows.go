@@ -77,9 +77,9 @@ func filetimeToUnix(t int64) int64 {
 var allowFileIDs = true
 
 // ReadDir lists path with GetFileInformationByHandleEx. One call returns a
-// whole batch with allocation size (right for compressed and sparse files),
-// so no file has to be opened one by one. Reparse points (junctions, symlinks,
-// OneDrive placeholders) are never entered.
+// whole batch with allocation size (right for compressed and sparse files,
+// and 0 for online-only cloud files), so no file has to be opened one by one.
+// Which folders are entered is decided by enterWindowsDir.
 //
 // It follows what Go's os.ReadDir does: ask for file IDs only when the volume
 // says it supports them, start with the "restart" class, and treat
@@ -132,20 +132,22 @@ func ReadDir(path string) ([]Entry, error) {
 		first = false
 		for off := uintptr(0); ; {
 			var e Entry
-			var attrs, next uint32
+			var attrs, next, tag uint32
 			if withIDs {
 				info := (*fileIDBothDirInfo)(unsafe.Pointer(&buf[off]))
 				e.Name = windows.UTF16ToString(unsafe.Slice(&info.FileName[0], info.FileNameLength/2))
 				e.Size, e.Ino, attrs, next = info.AllocationSize, uint64(info.FileID), info.FileAttributes, info.NextEntryOffset
+				tag = info.EaSize // holds the reparse tag when the item is a reparse point
 				e.Mtime = filetimeToUnix(info.LastWriteTime)
 			} else {
 				info := (*fileFullDirInfo)(unsafe.Pointer(&buf[off]))
 				e.Name = windows.UTF16ToString(unsafe.Slice(&info.FileName[0], info.FileNameLength/2))
 				e.Size, attrs, next = info.AllocationSize, info.FileAttributes, info.NextEntryOffset
+				tag = info.EaSize
 				e.Mtime = filetimeToUnix(info.LastWriteTime)
 			}
 			if e.Name != "." && e.Name != ".." {
-				e.IsDir = attrs&windows.FILE_ATTRIBUTE_DIRECTORY != 0 && attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
+				e.IsDir = enterWindowsDir(attrs, tag)
 				e.Dev = uint64(serial)
 				e.Linked = withIDs && attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0
 				out = append(out, e)

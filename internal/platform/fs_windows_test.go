@@ -2,6 +2,7 @@ package platform
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -103,5 +104,30 @@ func TestSystemDriveKind(t *testing.T) {
 	root := os.Getenv("SystemDrive") + `\`
 	if got := driveKind(root); got != KindSystem {
 		t.Fatalf("%s is %s", root, got)
+	}
+}
+
+func TestJunctionIsNotEntered(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	// mklink /J makes a junction without admin rights.
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Skipf("cannot make a junction: %v %s", err, out)
+	}
+	entries, err := ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name == "link" && e.IsDir {
+			t.Fatal("junction would be entered")
+		}
+		if e.Name == "target" && !e.IsDir {
+			t.Fatal("real folder would not be entered")
+		}
 	}
 }
