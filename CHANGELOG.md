@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.5] - 2026-11-03
+
+### Fixed
+
+- First published build with the 0.9.4 features. The 0.9.4 release failed in CI and was never published. The cause was a Windows test that compared a short temp path (RUNNER~1) with the long one in a shortcut. The test now compares the folders themselves. The app code is unchanged.
+
 ## [0.9.4] - 2026-11-03
 
 ### Added

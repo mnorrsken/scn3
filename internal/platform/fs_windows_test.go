@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -150,7 +149,17 @@ func TestShortcutTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.EqualFold(filepath.Clean(got), filepath.Clean(target)) {
+	// The temp dir may use a short 8.3 name (RUNNER~1) while the shortcut
+	// stores the long one, so compare the folders, not the strings.
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
 		t.Fatalf("got %s, want %s", got, target)
 	}
 }
