@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.4] - 2026-11-03
+
+### Added
+
+- Hidden folders can be shown again: a note at the top left of the chart says how many are hidden; click it for the list, then show one or all of them again. No rescan needed.
+- Cloud drives and folders get their own cards with a cloud icon: OneDrive, Dropbox, Box and iCloud on Windows (from Windows' sync root list), Google Drive's virtual drive, and on macOS everything in ~/Library/CloudStorage plus iCloud Drive. A cloud folder card shows no free space, because that belongs to the disk it is on.
+- When a cloud drive holds a shortcut to its own files kept elsewhere (Google Drive's "My Drive.lnk" when My Drive is kept on the local disk), the scan goes into that folder in its place. Paths, Copy path, Open and Trash use the real location.
+
 ## [0.9.3] - 2026-11-03
 
 ### Fixed

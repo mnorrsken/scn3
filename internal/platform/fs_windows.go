@@ -231,9 +231,13 @@ func Volumes() ([]Volume, error) {
 			}
 		}
 		kind := driveKind(root)
+		// Google Drive for desktop shows the account as a virtual drive with this label.
+		if l := windows.UTF16ToString(label[:]); strings.EqualFold(l, "Google Drive") {
+			kind = KindCloud
+		}
 		out = append(out, Volume{Path: root, Name: name, FS: fsName, Kind: kind, Hidden: kind == KindImage, Capacity: capacity, Free: free})
 	}
-	return out, nil
+	return withCloud(out), nil
 }
 
 // driveKind tells what kind of drive root (like `C:\`) is. Windows reports USB

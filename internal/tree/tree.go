@@ -195,6 +195,32 @@ func (t *Tree) Remove(id ID) {
 	t.recomputeTime(n.parent)
 }
 
+// Restore puts back a directory taken out with Remove, with its totals as
+// they were. Totals go up as far as the first removed ancestor, which keeps
+// them for when it is restored itself.
+func (t *Tree) Restore(id ID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if int(id) >= len(t.nodes) {
+		return
+	}
+	n := &t.nodes[id]
+	if id == Root || n.flags&flagRemoved == 0 {
+		return
+	}
+	n.flags &^= flagRemoved
+	t.denied += t.countDenied(id)
+	for i := n.parent; i != noParent; i = t.nodes[i].parent {
+		p := &t.nodes[i]
+		p.size += n.size
+		p.files = uint32(int64(p.files) + int64(n.files))
+		if p.flags&flagRemoved != 0 {
+			break
+		}
+	}
+	t.recomputeTime(n.parent)
+}
+
 func (t *Tree) countDenied(id ID) int {
 	n := &t.nodes[id]
 	if n.flags&flagRemoved != 0 {
@@ -412,6 +438,24 @@ func (t *Tree) viewNode(id ID, depth int, minBytes int64, files bool) *ViewNode 
 type Crumb struct {
 	Ref  int64  `json:"ref"`
 	Name string `json:"name"`
+}
+
+// Walk calls fn for every live directory, parents before children, with
+// what the scan counted directly in it. It is for tools that check a scan.
+func (t *Tree) Walk(fn func(path string, ownBytes, ownFiles int64, denied bool)) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	var visit func(id ID, path string)
+	visit = func(id ID, path string) {
+		n := &t.nodes[id]
+		fn(path, n.own, int64(n.ownFile), n.flags&flagDenied != 0)
+		for k := n.first; k < n.first+n.nkids; k++ {
+			if t.nodes[k].flags&flagRemoved == 0 {
+				visit(k, filepath.Join(path, t.name(&t.nodes[k])))
+			}
+		}
+	}
+	visit(Root, t.path)
 }
 
 // Crumbs returns the directories from the root down to id, inclusive.

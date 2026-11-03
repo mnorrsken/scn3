@@ -22,12 +22,13 @@ scn3 shows disk usage as a sunburst chart, on Windows, macOS and Linux. It is a 
 - Hover to see name and size.
 - Click to zoom, with animation.
 - Up, Back and Rescan buttons, and a breadcrumb.
-- Context menu: Zoom, Open, Copy path, Rescan, Hide, Move to Trash.
+- Context menu: Zoom, Open, Copy path, Rescan, Hide, Move to Trash. Hidden folders are listed in a note at the top left of the chart, where you can show them again.
 - Modern look with light, dark and high-contrast themes (System follows the OS, including its "increase contrast" setting).
 - Drives show an icon for their type: system, internal, external (USB, SD), network share, optical disc or disk image. Disk images, extra system volumes (such as macOS Recovery) and boot, snap and container mounts on Linux are listed only with "Show all drives" on.
 - Color by age (the clock button): each file and folder is colored by its newest change, old to new (blue, yellow, red in the light theme; plasma in dark; viridis in high contrast), compared only with the items next to it in the same folder. Ages are read during every scan at no extra cost.
 - Names in the chart can be turned off with the tag button.
 - At a drive's root, click the band inside the center circle to see only the scanned space fill the circle, without free and not-scanned space.
+- Cloud drives and folders (OneDrive, Google Drive, Dropbox, Box, iCloud Drive) get their own cards. Only what is on this disk counts; online-only files count as 0. On Windows, a shortcut at the top of a cloud drive that points to the files kept elsewhere (like Google Drive's "My Drive.lnk") is scanned as the folder it points to.
 - Large files show as their own segments, so they are easy to spot and move to the Trash. The folder in the center always shows its files; further out, a folder shows its files when they take up a visible part of the chart, otherwise they are an empty part of its arc.
 - Drive list.
 - Light and dark theme.

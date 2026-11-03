@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,6 +129,41 @@ func TestJunctionIsNotEntered(t *testing.T) {
 		}
 		if e.Name == "target" && !e.IsDir {
 			t.Fatal("real folder would not be entered")
+		}
+	}
+}
+
+func TestShortcutTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "My Drive")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lnk := filepath.Join(dir, "My Drive.lnk")
+	script := `$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); $s.TargetPath = $env:TARGET; $s.Save()`
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", script)
+	cmd.Env = append(os.Environ(), "LNK="+lnk, "TARGET="+target)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("cannot make a shortcut: %v %s", err, out)
+	}
+	got, err := ShortcutTarget(lnk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(filepath.Clean(got), filepath.Clean(target)) {
+		t.Fatalf("got %s, want %s", got, target)
+	}
+}
+
+func TestSyncRootName(t *testing.T) {
+	for _, c := range []struct{ id, path, want string }{
+		{`OneDrive!S-1-5-21-1!Personal`, `C:\Users\me\OneDrive`, "OneDrive (Personal)"},
+		{`OneDrive!S-1-5-21-1!Business1|abc`, `C:\Users\me\OneDrive - Work`, "OneDrive (Business1)"},
+		{`Dropbox!S-1-5-21-1!`, `C:\Users\me\Dropbox`, "Dropbox"},
+		{`iCloudDrive!S-1-5-21-1`, `C:\Users\me\iCloudDrive`, "iCloud Drive"},
+	} {
+		if got := syncRootName(c.id, c.path); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.id, got, c.want)
 		}
 	}
 }

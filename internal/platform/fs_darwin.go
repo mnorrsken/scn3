@@ -97,7 +97,7 @@ func Volumes() ([]Volume, error) {
 			Free:     int64(st.Bavail) * bsize,
 		})
 	}
-	return out, nil
+	return withCloud(out), nil
 }
 
 // volumeKind tells what kind of drive path is on. The mount flags settle the

@@ -60,6 +60,32 @@ func TestRemoveAndClear(t *testing.T) {
 	}
 }
 
+func TestRestoreUndoesRemove(t *testing.T) {
+	tr, a, b, c := sample(t)
+	before, files := tr.Size(Root)
+	tr.Remove(c)
+	tr.Restore(c)
+	if s, f := tr.Size(Root); s != before || f != files || !tr.Valid(c) {
+		t.Fatalf("after restore: %d bytes %d files, valid %v", s, f, tr.Valid(c))
+	}
+	tr.Restore(c) // restoring twice changes nothing
+	if s, _ := tr.Size(Root); s != before {
+		t.Fatalf("double restore: %d", s)
+	}
+	// Hide a child, then its parent; bring the child back while the parent is hidden.
+	tr.Remove(c)
+	tr.Remove(a)
+	tr.Restore(c)
+	if s, _ := tr.Size(Root); s != before-1100 {
+		t.Fatalf("child back under a hidden parent: root %d", s)
+	}
+	tr.Restore(a)
+	if s, _ := tr.Size(Root); s != before {
+		t.Fatalf("both back: root %d, want %d", s, before)
+	}
+	_ = b
+}
+
 func TestDeniedCount(t *testing.T) {
 	tr := New("/r")
 	a := tr.Add(Root, 0, 0, 0, []Child{{Name: "a"}, {Name: "b"}}, false)
@@ -181,6 +207,22 @@ func TestTimesPropagateAndShrinkOnRemove(t *testing.T) {
 	// b is empty now; the newest thing left is the root's own file (100).
 	if r, _, _ := times(); r != 100 {
 		t.Fatalf("after clearing b, root is %d", r)
+	}
+}
+
+func TestWalkVisitsEveryLiveDirectory(t *testing.T) {
+	tr, _, b, _ := sample(t)
+	tr.Remove(b)
+	got := map[string]int64{}
+	tr.Walk(func(path string, ownBytes, ownFiles int64, denied bool) { got[path] = ownFiles })
+	want := map[string]int64{"/r": 1, "/r/a": 2, "/r/a/c": 3}
+	for p, f := range want {
+		if got[filepath.FromSlash(p)] != f {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 

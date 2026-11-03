@@ -12,6 +12,7 @@ const (
 	KindNetwork  = "network"  // SMB, NFS and other network shares
 	KindOptical  = "optical"  // CD, DVD, Blu-ray
 	KindImage    = "image"    // disk image, loop or virtual disk
+	KindCloud    = "cloud"    // a cloud drive or a cloud sync folder
 )
 
 // Volume is a mounted filesystem.
@@ -21,6 +22,7 @@ type Volume struct {
 	FS       string `json:"fs"`
 	Kind     string `json:"kind"`
 	Hidden   bool   `json:"hidden"` // not a drive people think of: disk images, system and container mounts
+	Folder   bool   `json:"folder"` // a folder (a cloud sync folder), not a whole volume: no capacity
 	Capacity int64  `json:"capacity"`
 	Free     int64  `json:"free"`
 }
@@ -52,4 +54,19 @@ func (b *Boundary) Follow(e Entry, path string) bool {
 	}
 	_, ok := b.devs[e.Dev]
 	return ok
+}
+
+// withCloud appends the cloud folders that are not already listed.
+func withCloud(vols []Volume) []Volume {
+	seen := map[string]bool{}
+	for _, v := range vols {
+		seen[filepath.Clean(v.Path)] = true
+	}
+	for _, c := range CloudFolders() {
+		if !seen[filepath.Clean(c.Path)] {
+			seen[filepath.Clean(c.Path)] = true
+			vols = append(vols, c)
+		}
+	}
+	return vols
 }

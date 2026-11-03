@@ -1,4 +1,4 @@
-import { api, copyText, dialogs, onProgress, type Progress, type View, type Volume } from "./backend";
+import { api, copyText, dialogs, onProgress, type HiddenItem, type Progress, type View, type Volume } from "./backend";
 import {
   FULL, findArc, fitMiddle, formatBytes, formatDate, geometry, hitTest, layout, lerpDomain, MAX_DEPTH, minFraction, pathOf, zoomScene,
   heatColor, inWedge, scannedEnd, TAU, type Arc, type Colors, type Domain, type Geometry, type Mode,
@@ -206,6 +206,7 @@ function show(v: View): void {
   $("empty").hidden = true;
   updateLegend();
   updateChrome();
+  void updateHidden();
   schedule();
 }
 
@@ -337,6 +338,56 @@ async function trash(arc: Arc): Promise<void> {
   }
 }
 
+// ---- hidden folders ----
+
+let hiddenItems: HiddenItem[] = [];
+
+/** Shows how many folders are hidden in the scan on screen, as a chip that opens a list. */
+async function updateHidden(): Promise<void> {
+  const chip = $<HTMLButtonElement>("hidden-chip");
+  const scanRef = view?.crumbs[0]?.ref;
+  hiddenItems = scanRef === undefined ? [] : await api().Hidden(scanRef).catch(() => []);
+  chip.hidden = hiddenItems.length === 0;
+  if (chip.hidden) setHiddenMenu(false);
+  const size = hiddenItems.reduce((n, h) => n + h.size, 0);
+  chip.textContent = `${hiddenItems.length} hidden  ·  ${formatBytes(size)}`;
+  chip.title = "Show hidden folders again";
+  if (!$("hidden-menu").hidden) renderHiddenMenu();
+}
+
+function renderHiddenMenu(): void {
+  const menu = $("hidden-menu");
+  const unhide = (action: () => Promise<void>) => async () => {
+    try {
+      await action();
+      await refresh();
+    } catch (err) {
+      report(err);
+    }
+  };
+  const items = hiddenItems.map((h) => {
+    const b = document.createElement("button");
+    b.setAttribute("role", "menuitem");
+    b.title = `Show ${h.path} again`;
+    b.append(
+      Object.assign(document.createElement("span"), { className: "name", textContent: h.name }),
+      Object.assign(document.createElement("span"), { className: "size", textContent: formatBytes(h.size) }),
+    );
+    b.onclick = unhide(() => api().Unhide(h.ref));
+    return b;
+  });
+  const all = Object.assign(document.createElement("button"), { className: "all", textContent: "Show all again" });
+  all.setAttribute("role", "menuitem");
+  all.onclick = unhide(() => api().UnhideAll(hiddenItems[0].ref));
+  menu.replaceChildren(...items, ...(hiddenItems.length > 1 ? [all] : []));
+}
+
+function setHiddenMenu(open: boolean): void {
+  if (open) renderHiddenMenu();
+  $("hidden-menu").hidden = !open;
+  $("hidden-chip").setAttribute("aria-expanded", String(open));
+}
+
 async function hide(arc: Arc): Promise<void> {
   try {
     await api().Hide(arc.ref);
@@ -436,6 +487,8 @@ function showInfo(): void {
 function driveStatus(ref: number | undefined, free: number, capacity: number): [string, boolean] {
   const p = ref === undefined ? undefined : active.get(ref);
   if (p && !p.done) return [`Scanning… ${p.files.toLocaleString()} files`, true];
+  // A cloud sync folder has no free space of its own.
+  if (capacity <= 0) return [p ? `${formatBytes(p.bytes)} on this disk` : "Cloud folder", false];
   return [`${formatBytes(free)} free of ${formatBytes(capacity)}`, false];
 }
 
@@ -446,11 +499,14 @@ function driveCard(iconName: string, name: string, status: [string, boolean], us
   b.innerHTML = icon(iconName);
   const label = Object.assign(document.createElement("span"), { className: "name", textContent: name });
   const small = Object.assign(document.createElement("small"), { textContent: status[0] });
-  const meter = Object.assign(document.createElement("div"), { className: "meter" });
-  const fill = document.createElement("div");
-  fill.style.width = `${capacity > 0 ? (100 * used) / capacity : 0}%`;
-  meter.append(fill);
-  b.append(label, small, meter);
+  b.append(label, small);
+  if (capacity > 0) {
+    const meter = Object.assign(document.createElement("div"), { className: "meter" });
+    const fill = document.createElement("div");
+    fill.style.width = `${(100 * used) / capacity}%`;
+    meter.append(fill);
+    b.append(meter);
+  }
   b.onclick = onClick;
   li.append(b);
   return li;
@@ -650,6 +706,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeMenu();
     setThemeMenu(false);
+    setHiddenMenu(false);
   }
   else if (e.key === "Backspace") {
     e.preventDefault();
@@ -683,6 +740,11 @@ $("folder").onclick = async () => {
   }
 };
 $("privacy").onclick = () => void dialogs().OpenPrivacySettings();
+$("hidden-chip").onclick = () => setHiddenMenu($("hidden-menu").hidden !== false);
+document.addEventListener("mousedown", (e) => {
+  const t = e.target as Node;
+  if (!$("hidden-menu").contains(t) && !$("hidden-chip").contains(t)) setHiddenMenu(false);
+});
 $("denied-close").innerHTML = icon("close");
 $("denied-close").onclick = () => {
   if (view) deniedDismissed = `${view.crumbs[0]?.ref}:${view.denied}`;

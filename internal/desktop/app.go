@@ -56,6 +56,7 @@ type session struct {
 	cancel  context.CancelFunc
 	running bool
 	files   map[tree.ID][]platform.Entry // file listings of directories shown at the center
+	hidden  []tree.ID                    // folders hidden with Hide, in the order they were hidden
 }
 
 // App is bound to the webview. Methods are called from the UI.
@@ -120,8 +121,13 @@ func (a *App) Scan(path string) (int64, error) {
 	name := filepath.Base(sc.Root)
 	if vols, err := platform.Volumes(); err == nil {
 		for _, v := range vols {
-			if filepath.Clean(v.Path) == sc.Root {
-				volume, name = true, v.Name
+			if filepath.Clean(v.Path) != sc.Root {
+				continue
+			}
+			// A cloud sync folder is not a volume: the free space belongs to the disk it is on.
+			volume, name = !v.Folder, v.Name
+			if v.Kind == platform.KindCloud {
+				graftShortcuts(sc)
 			}
 		}
 	}
@@ -167,6 +173,27 @@ func (a *App) start(s *session, id tree.ID, walk func(context.Context, func(scan
 	}()
 }
 
+// graftShortcuts makes a scan of a cloud drive go into the folders that its
+// top-level shortcuts point to. Google Drive's virtual drive, for example,
+// holds only "My Drive.lnk" when My Drive is kept on the local disk.
+func graftShortcuts(sc *scanner.Scan) {
+	entries, _ := platform.ReadDir(sc.Root)
+	for _, e := range entries {
+		if e.IsDir || !strings.HasSuffix(strings.ToLower(e.Name), ".lnk") {
+			continue
+		}
+		name := e.Name[:len(e.Name)-len(".lnk")]
+		link := filepath.Join(sc.Root, e.Name)
+		target, err := platform.ShortcutTarget(link)
+		if err != nil {
+			continue
+		}
+		if t, err := platform.Stat(target); err == nil && t.IsDir {
+			sc.Graft(link, name, target)
+		}
+	}
+}
+
 // filesOf lists the files directly in directory id, cached until the tree changes.
 func (a *App) filesOf(s *session, id tree.ID) []platform.Entry {
 	a.mu.Lock()
@@ -176,7 +203,7 @@ func (a *App) filesOf(s *session, id tree.ID) []platform.Entry {
 		return cached
 	}
 	// A partial listing is still worth showing; what is missing stays in "other".
-	entries, _ := a.readDir(s.scan.Tree.Path(id))
+	entries, _ := a.readDir(s.scan.Path(id))
 	files := entries[:0]
 	for _, e := range entries {
 		if !e.IsDir {
@@ -281,7 +308,7 @@ func (a *App) addFiles(v *tree.ViewNode, maxDepth int, minBytes int64) {
 // directory entry itself go into "other".
 func placeFiles(s *session, id tree.ID, v *tree.ViewNode, files []platform.Entry, minBytes int64, center bool) {
 	own, ownFiles := s.scan.Tree.Own(id)
-	dir := s.scan.Tree.Path(id)
+	dir := s.scan.Path(id)
 	var shown []*tree.ViewNode
 	var sum int64
 	for _, e := range files {
@@ -336,7 +363,7 @@ func fileIn(s *session, id tree.ID, name string) (platform.Entry, string, error)
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 		return platform.Entry{}, "", fmt.Errorf("%q is not a file name", name)
 	}
-	dir := s.scan.Tree.Path(id)
+	dir := s.scan.Path(id)
 	path := filepath.Join(dir, name)
 	entries, err := platform.ReadDir(dir)
 	for _, e := range entries {
@@ -398,6 +425,16 @@ func (a *App) Rescan(ref int64) error {
 		return err
 	}
 	a.treeChanged(s)
+	// A rescan brings back what was hidden inside it.
+	a.mu.Lock()
+	kept := s.hidden[:0]
+	for _, h := range s.hidden {
+		if !s.scan.Tree.IsUnder(h, id) {
+			kept = append(kept, h)
+		}
+	}
+	s.hidden = kept
+	a.mu.Unlock()
 	a.start(s, id, func(ctx context.Context, cb func(scanner.Progress)) error {
 		return s.scan.Rescan(ctx, id, cb)
 	})
@@ -426,7 +463,7 @@ func (a *App) Trash(ref int64) error {
 	if id == tree.Root {
 		return errors.New("the root of a scan cannot be moved to the trash")
 	}
-	if err := a.trash(s.scan.Tree.Path(id)); err != nil {
+	if err := a.trash(s.scan.Path(id)); err != nil {
 		return err
 	}
 	s.scan.Remove(id)
@@ -445,7 +482,78 @@ func (a *App) Hide(ref int64) error {
 		return errors.New("the root of a scan cannot be hidden")
 	}
 	s.scan.Tree.Remove(id)
+	a.mu.Lock()
+	s.hidden = append(s.hidden, id)
+	a.mu.Unlock()
 	a.treeChanged(s)
+	return nil
+}
+
+// HiddenItem is a folder taken out of the chart with Hide.
+type HiddenItem struct {
+	Ref   int64  `json:"ref"`
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	Files int64  `json:"files"`
+}
+
+// Hidden lists the folders hidden in the scan that ref belongs to.
+func (a *App) Hidden(ref int64) []HiddenItem {
+	idx, _ := decode(ref)
+	a.mu.Lock()
+	s := a.byIdx[idx]
+	var ids []tree.ID
+	if s != nil {
+		ids = append(ids, s.hidden...)
+	}
+	a.mu.Unlock()
+	out := []HiddenItem{}
+	for _, id := range ids {
+		size, files := s.scan.Tree.Size(id)
+		path := s.scan.Path(id)
+		out = append(out, HiddenItem{Ref: encode(idx, id), Name: filepath.Base(path), Path: path, Size: size, Files: files})
+	}
+	return out
+}
+
+// Unhide brings back a folder hidden with Hide.
+func (a *App) Unhide(ref int64) error {
+	idx, id := decode(ref)
+	a.mu.Lock()
+	s := a.byIdx[idx]
+	if s == nil {
+		a.mu.Unlock()
+		return errors.New("that scan is gone")
+	}
+	if s.running {
+		a.mu.Unlock()
+		return ErrBusy
+	}
+	found := false
+	for i, h := range s.hidden {
+		if h == id {
+			s.hidden = append(s.hidden[:i], s.hidden[i+1:]...)
+			found = true
+			break
+		}
+	}
+	a.mu.Unlock()
+	if !found {
+		return errors.New("that folder is not hidden")
+	}
+	s.scan.Tree.Restore(id)
+	a.treeChanged(s)
+	return nil
+}
+
+// UnhideAll brings back every folder hidden in the scan that ref belongs to.
+func (a *App) UnhideAll(ref int64) error {
+	for _, h := range a.Hidden(ref) {
+		if err := a.Unhide(h.Ref); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -455,7 +563,7 @@ func (a *App) Reveal(ref int64) error {
 	if err != nil {
 		return err
 	}
-	path := s.scan.Tree.Path(id)
+	path := s.scan.Path(id)
 	if id == tree.Root {
 		return platform.RevealDir(path)
 	}
@@ -498,6 +606,8 @@ func (a *App) View(ref int64, maxDepth int, minFrac float64) (*View, error) {
 	if id == tree.Root {
 		v.Name = s.name
 	}
+	v.Path = s.scan.Path(id)
+	markGrafts(v, s)
 	offset(v, s.idx)
 	a.addFiles(v, maxDepth, minBytes)
 	if atVolume {
@@ -532,6 +642,20 @@ func addVolumeArcs(v *tree.ViewNode, unscanned, free int64) {
 	}
 	if free > 0 {
 		v.Kids = append(v.Kids, &tree.ViewNode{Ref: -1, Name: "free", Size: free, Kind: KindFree})
+	}
+}
+
+// markGrafts gives folders scanned in place of a shortcut their real path, so
+// the UI does not build a path through the shortcut. Call it before offset.
+func markGrafts(v *tree.ViewNode, s *session) {
+	for _, k := range v.Kids {
+		if k.Kind != tree.KindDir || k.Ref < 0 {
+			continue
+		}
+		if target, ok := s.scan.GraftTarget(tree.ID(k.Ref)); ok {
+			k.Path = target
+		}
+		markGrafts(k, s)
 	}
 }
 

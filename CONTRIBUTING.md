@@ -32,6 +32,17 @@ You need Go (the version in `go.mod`) and Node.js. On Linux also `libgtk-3-dev` 
 | `make lint` | Runs golangci-lint |
 | `make fmt` | Formats the Go code |
 
+## Checking what a scan misses
+
+`tools/scancheck` compares the app's scan with a slower, separate walk of the same folder and lists every difference with a reason and whether it is fine to ignore:
+
+```sh
+go run ./tools/scancheck app <path> > app.jsonl            # as your normal user
+sudo go run ./tools/scancheck compare <path> app.jsonl > report.md   # best as admin
+```
+
+On Windows, run the second command in a terminal opened with **Run as administrator**. The tool is not part of any release.
+
 ## Code layout
 
 - `internal/platform`: everything that differs per OS, one file per OS (`_windows.go`, `_linux.go`, `_darwin.go`).

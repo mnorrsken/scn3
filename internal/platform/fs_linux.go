@@ -165,7 +165,7 @@ func Volumes() ([]Volume, error) {
 		kind := volumeKind(m, "/sys")
 		out = append(out, Volume{Path: m.path, Name: m.path, FS: m.fs, Kind: kind, Hidden: hiddenMount(m, kind), Capacity: capacity, Free: free})
 	}
-	return out, nil
+	return withCloud(out), nil
 }
 
 // NewBoundary keeps a scan on the device of root and out of every mount below

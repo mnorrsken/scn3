@@ -247,3 +247,51 @@ func TestProgressEndsWithDone(t *testing.T) {
 		t.Fatalf("last progress = %+v", last)
 	}
 }
+
+func TestGraftScansTheTargetInPlaceOfAShortcut(t *testing.T) {
+	root := t.TempDir()
+	mirror := t.TempDir() // where "My Drive" really is
+	write(t, filepath.Join(root, "Shared drives/x"), 1000)
+	write(t, filepath.Join(root, "My Drive.lnk"), 10)
+	write(t, filepath.Join(mirror, "docs/report.pdf"), 500_000)
+
+	s, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realMirror, _ := filepath.EvalSymlinks(mirror)
+	s.Graft(filepath.Join(s.Root, "My Drive.lnk"), "My Drive", realMirror)
+	if err := s.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	var drive tree.ID
+	for _, k := range s.Tree.View(tree.Root, 1, 0, true).Kids {
+		if k.Name == "My Drive.lnk" {
+			t.Fatal("the shortcut itself was counted")
+		}
+		if k.Name == "My Drive" {
+			drive = tree.ID(k.Ref)
+		}
+	}
+	if drive == 0 {
+		t.Fatal("no My Drive folder")
+	}
+	if size, files := s.Tree.Size(drive); files != 1 || size < 500_000 {
+		t.Fatalf("My Drive: %d bytes, %d files", size, files)
+	}
+	if got, ok := s.GraftTarget(drive); !ok || got != realMirror {
+		t.Fatalf("graft target %q %v", got, ok)
+	}
+	docs := tree.ID(s.Tree.View(drive, 1, 0, true).Kids[0].Ref)
+	if got := s.Path(docs); got != filepath.Join(realMirror, "docs") {
+		t.Fatalf("real path %q", got)
+	}
+	// Rescanning inside the graft reads the real folder.
+	write(t, filepath.Join(mirror, "docs/more.pdf"), 500_000)
+	if err := s.Rescan(context.Background(), docs, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, files := s.Tree.Size(drive); files != 2 {
+		t.Fatalf("after rescan: %d files", files)
+	}
+}

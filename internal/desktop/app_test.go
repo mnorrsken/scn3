@@ -110,6 +110,55 @@ func TestHideThenRescanBringsBack(t *testing.T) {
 	}
 }
 
+func TestUnhideBringsAFolderBack(t *testing.T) {
+	a, ref, _ := setup(t)
+	v, _ := a.View(ref, 8, 0)
+	before := v.Root.Size
+	small := find(t, v, "small")
+	big := find(t, v, "big")
+	for _, r := range []int64{small.Ref, big.Ref} {
+		if err := a.Hide(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hidden := a.Hidden(ref)
+	if len(hidden) != 2 || hidden[0].Name != "small" || hidden[0].Size == 0 {
+		t.Fatalf("hidden = %+v", hidden)
+	}
+	if err := a.Unhide(small.Ref); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = a.View(ref, 8, 0)
+	if find(t, v, "small") == nil || len(a.Hidden(ref)) != 1 {
+		t.Fatalf("small not back, hidden %+v", a.Hidden(ref))
+	}
+	if err := a.Unhide(small.Ref); err == nil {
+		t.Fatal("unhid a folder that is not hidden")
+	}
+	if err := a.UnhideAll(ref); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = a.View(ref, 8, 0)
+	if v.Root.Size != before || len(a.Hidden(ref)) != 0 {
+		t.Fatalf("after unhide all: %d, want %d; hidden %+v", v.Root.Size, before, a.Hidden(ref))
+	}
+}
+
+func TestRescanForgetsHiddenInside(t *testing.T) {
+	a, ref, _ := setup(t)
+	v, _ := a.View(ref, 8, 0)
+	if err := a.Hide(find(t, v, "small").Ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Rescan(ref); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, a, ref)
+	if h := a.Hidden(ref); len(h) != 0 {
+		t.Fatalf("still listed as hidden after rescan: %+v", h)
+	}
+}
+
 func TestRootCannotBeTrashedOrHidden(t *testing.T) {
 	a, ref, root := setup(t)
 	if err := a.Trash(ref); err == nil {

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,9 @@ type Scan struct {
 	ProgressEvery time.Duration
 	// Workers is the number of parallel directory readers.
 	Workers int
+
+	grafts   map[string]graft // shortcut path -> folder scanned in its place
+	graftIDs map[tree.ID]string
 
 	readErrs []error // the first few read errors, for reporting
 }
@@ -95,7 +99,7 @@ func (s *Scan) Run(ctx context.Context, onProgress func(Progress)) error {
 
 // Rescan scans directory id again and patches the result into the tree.
 func (s *Scan) Rescan(ctx context.Context, id tree.ID, onProgress func(Progress)) error {
-	path := s.Tree.Path(id)
+	path := s.Path(id)
 	e, err := platform.Stat(path)
 	if err != nil {
 		// Gone from disk: drop it, as a full rescan would.
@@ -155,6 +159,47 @@ func (s *Scan) forget(id tree.ID) {
 	}
 }
 
+// graft is a folder scanned in place of a shortcut that points to it.
+type graft struct {
+	name   string // the name it gets in the tree
+	target string // where it really is
+}
+
+// Graft makes the scan treat the shortcut file at link as a folder named name,
+// and scan target in its place. Cloud drives use this: Google Drive's virtual
+// drive holds "My Drive.lnk" when My Drive is kept on the local disk. Call it
+// before Run.
+func (s *Scan) Graft(link, name, target string) {
+	if s.grafts == nil {
+		s.grafts = map[string]graft{}
+		s.graftIDs = map[tree.ID]string{}
+	}
+	s.grafts[filepath.Clean(link)] = graft{name: name, target: filepath.Clean(target)}
+}
+
+// Path returns where directory id really is on disk, following grafts.
+func (s *Scan) Path(id tree.ID) string {
+	p := s.Tree.Path(id)
+	for link, g := range s.grafts {
+		virtual := filepath.Join(filepath.Dir(link), g.name)
+		if p == virtual {
+			return g.target
+		}
+		if rest, ok := strings.CutPrefix(p, virtual+string(filepath.Separator)); ok {
+			return filepath.Join(g.target, rest)
+		}
+	}
+	return p
+}
+
+// GraftTarget reports whether id is a grafted folder, and where it really is.
+func (s *Scan) GraftTarget(id tree.ID) (string, bool) {
+	s.seenMu.Lock()
+	defer s.seenMu.Unlock()
+	t, ok := s.graftIDs[id]
+	return t, ok
+}
+
 type job struct {
 	id   tree.ID
 	path string
@@ -172,6 +217,7 @@ type result struct {
 	files  uint32
 	ftime  int64 // newest loose file
 	kids   []tree.Child
+	paths  []string // where each kid really is, if not inside path (grafts)
 	linked []linkedFile
 	err    error
 }
@@ -227,7 +273,12 @@ func (s *Scan) read(j job) result {
 		case e.IsDir:
 			if s.boundary.Follow(e, filepath.Join(j.path, e.Name)) {
 				r.kids = append(r.kids, tree.Child{Name: e.Name, Own: e.Size, Mtime: e.Mtime})
+				r.paths = append(r.paths, "")
 			}
+		case s.grafts != nil && s.grafts[filepath.Join(j.path, e.Name)].target != "":
+			g := s.grafts[filepath.Join(j.path, e.Name)]
+			r.kids = append(r.kids, tree.Child{Name: g.name, Mtime: e.Mtime})
+			r.paths = append(r.paths, g.target)
 		case e.Linked:
 			r.linked = append(r.linked, linkedFile{fileKey{e.Dev, e.Ino}, e.Size})
 			r.ftime = max(r.ftime, e.Mtime)
@@ -319,7 +370,14 @@ func (s *Scan) walk(ctx context.Context, start tree.ID, path string, onProgress 
 			s.seenMu.Unlock()
 			first := s.Tree.Add(r.id, r.bytes, r.files, r.ftime, r.kids, r.err != nil)
 			for i, k := range r.kids {
-				jobs.push(job{id: first + tree.ID(i), path: filepath.Join(r.path, k.Name)})
+				path := filepath.Join(r.path, k.Name)
+				if r.paths[i] != "" {
+					path = r.paths[i]
+					s.seenMu.Lock()
+					s.graftIDs[first+tree.ID(i)] = path
+					s.seenMu.Unlock()
+				}
+				jobs.push(job{id: first + tree.ID(i), path: path})
 				bytes.Add(k.Own)
 			}
 			pending += len(r.kids)

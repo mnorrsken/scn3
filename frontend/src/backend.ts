@@ -33,8 +33,9 @@ export interface Volume {
   path: string;
   name: string;
   fs: string;
-  kind: "system" | "internal" | "external" | "network" | "optical" | "image";
+  kind: "system" | "internal" | "external" | "network" | "optical" | "image" | "cloud";
   hidden: boolean;
+  folder: boolean; // a cloud sync folder, not a whole volume
   capacity: number;
   free: number;
 }
@@ -47,6 +48,14 @@ export interface Progress {
   errors: number;
   elapsed: number;
   done: boolean;
+}
+
+export interface HiddenItem {
+  ref: number;
+  name: string;
+  path: string;
+  size: number;
+  files: number;
 }
 
 export interface Settings {
@@ -65,6 +74,9 @@ interface Api {
   Rescan(ref: number): Promise<void>;
   Trash(ref: number): Promise<void>;
   Hide(ref: number): Promise<void>;
+  Hidden(ref: number): Promise<HiddenItem[]>;
+  Unhide(ref: number): Promise<void>;
+  UnhideAll(ref: number): Promise<void>;
   Reveal(ref: number): Promise<void>;
   TrashFile(dirRef: number, name: string): Promise<void>;
   RevealFile(dirRef: number, name: string): Promise<void>;
