@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.6] - 2026-11-16
+
+### Changed
+
+- Updated dependencies: golang.org/x/sys 0.49.0 to 0.50.0 and vite 8.3.6 to 8.3.8. No change in behavior.
+
 ## [0.9.5] - 2026-11-03
 
 ### Fixed
