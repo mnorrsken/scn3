@@ -15,6 +15,46 @@ scn3 shows disk usage as a sunburst chart, on Windows, macOS and Linux. It is a 
   </tr>
 </table>
 
+## Install
+
+Downloads are on the [releases page](https://github.com/mnorrsken/scn3/releases/latest). The macOS and Windows files are not signed with a paid certificate yet, so both systems warn the first time. The steps below get past the warnings. Check a download against `checksums.txt` from the same release if you want to be sure it is the real file.
+
+### macOS (13 or newer)
+
+With [Homebrew](https://brew.sh), the easiest way:
+
+```sh
+brew install mnorrsken/tap/scn3
+```
+
+The cask removes the quarantine flag after install, so the app opens without a warning. `brew upgrade` gets new versions.
+
+With the dmg instead:
+
+1. Open `scn3-<version>.dmg` and drag scn3 to Applications.
+2. Start scn3. macOS says it cannot check the app for malware. Click **Done**.
+3. Open **System Settings → Privacy & Security**, scroll down to **Security** and click **Open Anyway** next to "scn3 was blocked". Enter your password, then click **Open Anyway** again.
+
+macOS remembers this, so you do it once per version. Right-click → Open no longer skips the check on macOS 15 and newer. In a terminal, `xattr -dr com.apple.quarantine /Applications/scn3.app` does the same as step 3.
+
+### Windows (10 and 11)
+
+Two files: `scn3-amd64-installer.exe` installs scn3 for all users (and WebView2 if it is missing); `scn3.exe` runs without install.
+
+1. **Download in Edge.** Edge may say the file "isn't commonly downloaded". Open Downloads (Ctrl+J), point at the file, click **…** → **Keep**, then **Show more** → **Keep anyway**. Chrome and Firefox may ask in a similar way.
+2. **Unblock the file**, so SmartScreen does not stop it. Either:
+   - right-click the file in Explorer → **Properties** → on the **General** tab, at the bottom, check **Unblock** → **OK**; or
+   - when you start it and "Windows protected your PC" shows, click **More info** → **Run anyway**.
+
+   In PowerShell, `Unblock-File .\scn3-amd64-installer.exe` does the same as the Unblock check box.
+3. The installer asks for admin rights and shows "Unknown publisher". Click **Yes**.
+
+If **Smart App Control** is on (Windows Security → App & browser control), Windows 11 blocks unsigned apps and shows no **Run anyway**. Then the only way is to turn Smart App Control off there.
+
+### Linux
+
+`sudo apt install ./scn3_*.deb` (Debian, Ubuntu) or `sudo dnf install ./scn3-*.rpm` (Fedora, openSUSE) also installs WebKitGTK. The AppImage needs WebKitGTK 4.1 installed.
+
 ## Features
 
 - Parallel scan with progress and cancel.
@@ -100,6 +140,8 @@ Signing secrets are optional. Without them, builds are unsigned.
 
 - macOS: `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`
 - Windows: `WINDOWS_CERT_PFX`, `WINDOWS_CERT_PASSWORD`
+
+After a release (not a pre-release), the workflow sets the new version and sha256 in the cask in [mnorrsken/homebrew-tap](https://github.com/mnorrsken/homebrew-tap). This needs `HOMEBREW_TAP_TOKEN`: a fine-grained token with **Contents: Read and write** on that repo only. Without it, the cask is not updated.
 
 ## Contributing
 

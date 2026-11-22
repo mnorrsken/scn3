@@ -44,7 +44,7 @@ lint:
 	golangci-lint run
 
 vuln:
-	go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+	go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
 # CLI binaries for every OS. The desktop app needs a native build per OS: see release.yml.
 dist: vuln

@@ -25,7 +25,7 @@ jobs:
       - run: go test -race ./internal/... ./cmd/...
       - name: govulncheck
         if: runner.os == 'Linux'
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./internal/... ./cmd/...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./internal/... ./cmd/...
       - uses: actions/setup-node@v7
         if: runner.os == 'Linux'
         with:
@@ -94,8 +94,8 @@ jobs:
         run: |
           export VERSION="${GITHUB_REF#refs/tags/v}"
           mkdir -p dist
-          go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0 package -f packaging/linux/nfpm.yaml -p deb -t dist/
-          go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0 package -f packaging/linux/nfpm.yaml -p rpm -t dist/
+          go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.49.0 package -f packaging/linux/nfpm.yaml -p deb -t dist/
+          go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.49.0 package -f packaging/linux/nfpm.yaml -p rpm -t dist/
       - name: AppImage
         run: packaging/linux/appimage.sh
       - uses: actions/upload-artifact@v7
@@ -257,8 +257,10 @@ jobs:
             echo "## Installing"
             echo
             echo "- **Linux:** \`sudo apt install ./scn3_*.deb\` or \`sudo dnf install ./scn3-*.rpm\` also installs WebKitGTK. The AppImage needs WebKitGTK 4.1 installed."
-            echo "- **macOS:** the app is not signed yet. On first start, open System Settings → Privacy & Security and click **Open Anyway**."
-            echo "- **Windows:** the files are not signed yet. If SmartScreen warns, click **More info**, then **Run anyway**."
+            echo "- **macOS:** \`brew install mnorrsken/tap/scn3\` installs the app so it opens without a warning. With the dmg: the app is not signed yet, so on first start open System Settings → Privacy & Security and click **Open Anyway**."
+            echo "- **Windows:** the files are not signed yet. If Edge blocks the download, open Downloads, click **…** → **Keep** → **Show more** → **Keep anyway**. Then right-click the file → **Properties** → check **Unblock** → **OK**, or click **More info** → **Run anyway** when SmartScreen warns."
+            echo
+            echo "Step by step: [Install](https://github.com/${GITHUB_REPOSITORY}#install)."
             echo
             echo "Check a download with \`sha256sum -c checksums.txt --ignore-missing\`. Licenses of included third-party code are in \`THIRD_PARTY_NOTICES.txt\`."
           } > notes.md
@@ -270,3 +272,27 @@ jobs:
           flags=
           case "$VERSION" in *-*) flags=--prerelease ;; esac
           gh release create "$VERSION" --title "scn3 $VERSION" --notes-file notes.md $flags artifacts/*
+
+  homebrew:
+    needs: release
+    # Pre-releases (v1.2.3-beta.1) leave the cask alone.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Update the cask in mnorrsken/homebrew-tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          [ -n "$TAP_TOKEN" ] || { echo "No HOMEBREW_TAP_TOKEN: the cask is not updated"; exit 0; }
+          V="${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p checksums.txt
+          SHA=$(awk -v f="scn3-$V.dmg" '$2 == f { print $1 }' checksums.txt)
+          [ -n "$SHA" ] || { echo "scn3-$V.dmg is not in checksums.txt" >&2; exit 1; }
+          git clone -q "https://x-access-token:${TAP_TOKEN}@github.com/mnorrsken/homebrew-tap.git" tap
+          cd tap
+          sed -i -e "s/^  version \".*\"/  version \"$V\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/scn3.rb
+          if git diff --quiet; then echo "The cask is already at $V"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qam "Update scn3 to $V"
+          git push -q origin HEAD

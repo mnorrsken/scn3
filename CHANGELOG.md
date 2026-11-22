@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.7] - 2026-11-22
+
+### Added
+
+- macOS: install with `brew install mnorrsken/tap/scn3`. The cask removes the quarantine flag, so the unsigned app opens without a warning. Each release updates the cask.
+- The README and the release notes explain step by step how to open the unsigned downloads on macOS and Windows (Edge's "Keep anyway", the Unblock check box, SmartScreen's "Run anyway").
+
+### Changed
+
+- Builds use Go 1.27.4, which fixes GO-2026-6859 in net/http.
+- Updated dependencies: golang.org/x/crypto 0.59.0, golang.org/x/net 0.63.0, golang.org/x/text 0.44.0, go-webview2 1.0.23, vitest 5.1.1, nfpm 2.49.0 and govulncheck 1.10.0.
+
 ## [0.9.6] - 2026-11-16
 
 ### Changed
